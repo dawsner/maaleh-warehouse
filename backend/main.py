@@ -28,6 +28,36 @@ except Exception as _e:
     # Migrations are best-effort; never block app startup
     print(f"[migration] warning: {_e}")
 
+
+def _seed_if_empty():
+    """אם ה-DB ריק לחלוטין (אין משתמשים) — מריץ את ה-seed.
+    שימושי בעיקר ב-deploy ראשון (Render / VPS), כדי שלא תהיה דרישה ידנית."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        if db.query(models.User).count() == 0:
+            print("[seed] DB ריק — מריץ seed ראשוני...")
+            import subprocess
+            import os
+            seed_path = os.path.join(os.path.dirname(__file__), "seed.py")
+            if os.path.exists(seed_path):
+                result = subprocess.run(
+                    ["python3", seed_path],
+                    capture_output=True, text=True, cwd=os.path.dirname(__file__)
+                )
+                if result.returncode == 0:
+                    print("[seed] הושלם בהצלחה")
+                else:
+                    print(f"[seed] שגיאה: {result.stderr}")
+    finally:
+        db.close()
+
+
+try:
+    _seed_if_empty()
+except Exception as _e:
+    print(f"[seed] warning: {_e}")
+
 app = FastAPI(
     title="מחסן מעלה - מערכת ניהול השאלות",
     description="מערכת ניהול השאלות לבית ספר לקולנוע מעלה",
