@@ -1,6 +1,7 @@
 import React from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useCart } from '../contexts/CartContext'
 import Logo from './Logo'
 
 const managerNav = [
@@ -13,13 +14,16 @@ const managerNav = [
 
 const studentNav = [
   { to: '/student', label: 'לוח בקרה', icon: '🏠', end: true },
-  { to: '/student/browse', label: 'ערכות זמינות', icon: '🎒' },
+  { to: '/student/browse', label: 'ערכות', icon: '🎒' },
+  { to: '/student/equipment', label: 'ציוד בודד', icon: '📦' },
+  { to: '/student/cart', label: 'הזמנה', icon: '🛒', cartBadge: true },
   { to: '/student/loans', label: 'ההשאלות שלי', icon: '📋' },
 ]
 
 export default function Sidebar({ role, isOpen, onClose }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const cart = useCart()
   const navItems = role === 'admin' ? managerNav : studentNav
 
   const handleLogout = () => {
@@ -69,7 +73,12 @@ export default function Sidebar({ role, isOpen, onClose }) {
               }
             >
               <span className="text-lg">{item.icon}</span>
-              <span>{item.label}</span>
+              <span className="flex-1">{item.label}</span>
+              {item.cartBadge && cart.count > 0 && (
+                <span className="bg-primary-600 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                  {cart.count}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

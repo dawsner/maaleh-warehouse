@@ -4,20 +4,22 @@
 
 services:
   # ---- BACKEND (FastAPI) -------------------------------------------------
+  # FREE tier - נרדם אחרי 15 דקות חוסר פעילות. DB ייאתחל בכל cold start
+  # (seed.py רץ אוטומטית). מתאים לדמו, לא ל-production.
   - type: web
     name: maaleh-warehouse-api
     runtime: python
-    plan: starter                    # ~$7/mo עם disk
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    autoDeploy: true                 # deploy אוטומטי בכל push למיין
+    autoDeploy: true
     envVars:
       - key: ENV
         value: production
       - key: JWT_SECRET_KEY
-        generateValue: true          # Render מייצר אוטומטית value חזק
+        generateValue: true
       - key: ACCESS_TOKEN_EXPIRE_DAYS
         value: "7"
       - key: LOGIN_RATE_LIMIT
@@ -26,11 +28,7 @@ services:
         fromService:
           type: web
           name: maaleh-warehouse-web
-          property: hostport         # ייתן לדוגמה https://maaleh-warehouse-web.onrender.com
-    disk:
-      name: maaleh-warehouse-data
-      mountPath: /opt/render/project/src/backend
-      sizeGB: 1                      # מספיק להרבה שנים של DB
+          property: hostport
 
   # ---- FRONTEND (React + Vite static build) ------------------------------
   - type: web

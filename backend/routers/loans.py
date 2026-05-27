@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List
@@ -9,6 +10,24 @@ import models
 import schemas
 
 router = APIRouter(prefix="/loans", tags=["loans"])
+
+
+def _loan_target_name(loan: models.LoanRequest) -> str:
+    """שם תצוגה ל-loan — לערכה או לפריט בודד."""
+    if loan.kit:
+        return loan.kit.name
+    if loan.equipment:
+        qty = loan.quantity or 1
+        return f"{loan.equipment.name}{f' x{qty}' if qty > 1 else ''}"
+    return "פריט"
+
+
+def _loans_query_with_relations(db: Session):
+    return db.query(models.LoanRequest).options(
+        joinedload(models.LoanRequest.student),
+        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment),
+        joinedload(models.LoanRequest.equipment),
+    )
 
 
 def _enrich_overdue(loan: models.LoanRequest) -> schemas.LoanOut:
@@ -31,10 +50,7 @@ def get_loans(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    query = db.query(models.LoanRequest).options(
-        joinedload(models.LoanRequest.student),
-        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment)
-    )
+    query = _loans_query_with_relations(db)
 
     if current_user.role == "student":
         query = query.filter(models.LoanRequest.student_id == current_user.id)
@@ -56,55 +72,85 @@ def get_loans(
     return enriched
 
 
+def _create_single_loan(
+    db: Session,
+    student: models.User,
+    item: schemas.LoanBatchItem,
+    notes: Optional[str],
+    preferred_date: Optional[datetime],
+    batch_id: Optional[str],
+) -> models.LoanRequest:
+    """יוצר LoanRequest בודד — או על ערכה או על פריט. מעלה HTTPException על שגיאה."""
+    if (item.kit_id is None) == (item.equipment_id is None):
+        raise HTTPException(status_code=400, detail="כל פריט בהזמנה חייב להיות או ערכה או פריט בודד (לא שניהם ולא אף אחד)")
+
+    kit_target = None
+    equipment_target = None
+
+    if item.kit_id is not None:
+        kit_target = db.query(models.Kit).filter(models.Kit.id == item.kit_id, models.Kit.active == True).first()
+        if not kit_target:
+            raise HTTPException(status_code=404, detail=f"ערכה {item.kit_id} לא נמצאה")
+        if student.year:
+            if student.year < kit_target.min_year or student.year > kit_target.max_year:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"הערכה '{kit_target.name}' זמינה לשנים {kit_target.min_year}-{kit_target.max_year} בלבד"
+                )
+    else:
+        equipment_target = db.query(models.Equipment).filter(
+            models.Equipment.id == item.equipment_id,
+            models.Equipment.active == True
+        ).first()
+        if not equipment_target:
+            raise HTTPException(status_code=404, detail=f"פריט {item.equipment_id} לא נמצא")
+
+    qty = max(1, int(item.quantity or 1))
+
+    db_loan = models.LoanRequest(
+        student_id=student.id,
+        kit_id=item.kit_id,
+        equipment_id=item.equipment_id,
+        quantity=qty,
+        batch_id=batch_id,
+        notes=notes,
+        preferred_date=preferred_date,
+        status="pending"
+    )
+    db.add(db_loan)
+    db.flush()
+
+    target_name = kit_target.name if kit_target else f"{equipment_target.name} x{qty}" if qty > 1 else equipment_target.name
+    log_activity(
+        db,
+        user_id=student.id,
+        action="loan.requested",
+        entity_type="loan",
+        entity_id=db_loan.id,
+        description=f"{student.name} ביקש את '{target_name}'",
+    )
+    return db_loan
+
+
 @router.post("", response_model=schemas.LoanOut)
 def create_loan_request(
     loan: schemas.LoanRequestCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
+    """תאימות אחורה — יצירת בקשה לפריט יחיד (ערכה או ציוד)."""
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="רק סטודנטים יכולים ליצור בקשות השאלה")
 
-    kit = db.query(models.Kit).filter(models.Kit.id == loan.kit_id, models.Kit.active == True).first()
-    if not kit:
-        raise HTTPException(status_code=404, detail="ערכה לא נמצאה")
-
-    # Check year eligibility
-    if current_user.year:
-        if current_user.year < kit.min_year or current_user.year > kit.max_year:
-            raise HTTPException(
-                status_code=400,
-                detail=f"ערכה זו זמינה לשנים {kit.min_year}-{kit.max_year} בלבד"
-            )
-
-    # Check for existing active request for same kit
-    existing = db.query(models.LoanRequest).filter(
-        models.LoanRequest.student_id == current_user.id,
-        models.LoanRequest.kit_id == loan.kit_id,
-        models.LoanRequest.status.in_(["pending", "approved", "active"])
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="יש לך כבר בקשה פעילה עבור ערכה זו")
-
-    db_loan = models.LoanRequest(
-        student_id=current_user.id,
+    item = schemas.LoanBatchItem(
         kit_id=loan.kit_id,
-        notes=loan.notes,
-        preferred_date=loan.preferred_date,
-        status="pending"
+        equipment_id=loan.equipment_id,
+        quantity=loan.quantity,
     )
-    db.add(db_loan)
-    db.flush()
+    db_loan = _create_single_loan(db, current_user, item, loan.notes, loan.preferred_date, batch_id=None)
 
-    # Activity log + notify all admins
-    log_activity(
-        db,
-        user_id=current_user.id,
-        action="loan.requested",
-        entity_type="loan",
-        entity_id=db_loan.id,
-        description=f"{current_user.name} ביקש את הערכה '{kit.name}'",
-    )
+    # Notify admins
+    target_name = db_loan.kit.name if db_loan.kit else (db_loan.equipment.name if db_loan.equipment else "פריט")
     admins = db.query(models.User).filter(models.User.role == "admin", models.User.active == True).all()
     for admin in admins:
         notify(
@@ -112,17 +158,63 @@ def create_loan_request(
             user_id=admin.id,
             type_="new_request",
             title="בקשת השאלה חדשה",
-            body=f"{current_user.name} ביקש את '{kit.name}'",
+            body=f"{current_user.name} ביקש את '{target_name}'",
             link="/manager/loans",
         )
 
     db.commit()
     db.refresh(db_loan)
 
-    return db.query(models.LoanRequest).options(
-        joinedload(models.LoanRequest.student),
-        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment)
-    ).filter(models.LoanRequest.id == db_loan.id).first()
+    return _loans_query_with_relations(db).filter(models.LoanRequest.id == db_loan.id).first()
+
+
+@router.post("/batch", response_model=List[schemas.LoanOut])
+def create_loan_batch(
+    batch: schemas.LoanBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """יצירת מספר בקשות יחד מעגלת קניות — ערכות+פריטים בודדים בבקשה אחת."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="רק סטודנטים יכולים ליצור בקשות השאלה")
+    if not batch.items:
+        raise HTTPException(status_code=400, detail="ההזמנה ריקה")
+
+    batch_id = uuid.uuid4().hex[:12]
+    created_loans = []
+    target_names = []
+
+    for item in batch.items:
+        db_loan = _create_single_loan(
+            db, current_user, item,
+            notes=batch.notes,
+            preferred_date=batch.preferred_date,
+            batch_id=batch_id,
+        )
+        created_loans.append(db_loan)
+        if db_loan.kit:
+            target_names.append(db_loan.kit.name)
+        elif db_loan.equipment:
+            qty = db_loan.quantity or 1
+            target_names.append(f"{db_loan.equipment.name}{f' x{qty}' if qty > 1 else ''}")
+
+    # התראה אחת מסכמת למנהלים
+    summary = " · ".join(target_names) if len(target_names) <= 4 else f"{len(target_names)} פריטים"
+    admins = db.query(models.User).filter(models.User.role == "admin", models.User.active == True).all()
+    for admin in admins:
+        notify(
+            db,
+            user_id=admin.id,
+            type_="new_request",
+            title=f"בקשת השאלה חדשה ({len(created_loans)} פריטים)",
+            body=f"{current_user.name}: {summary}",
+            link="/manager/loans",
+        )
+
+    db.commit()
+
+    ids = [l.id for l in created_loans]
+    return _loans_query_with_relations(db).filter(models.LoanRequest.id.in_(ids)).all()
 
 
 @router.put("/{loan_id}/approve", response_model=schemas.LoanOut)
@@ -139,14 +231,14 @@ def approve_loan(
     if loan.status != "pending":
         raise HTTPException(status_code=400, detail="ניתן לאשר רק בקשות ממתינות")
 
-    # בדיקת זמינות בטווח התאריכים המבוקש
-    if not force:
+    # בדיקת זמינות בטווח התאריכים המבוקש (רק לערכות; לפריט בודד נדלג בינתיים)
+    if not force and loan.kit_id:
         from routers.kits import calculate_kit_availability
         available = calculate_kit_availability(
             loan.kit_id, db,
             at_date=approval.loan_date,
             until_date=approval.due_date,
-            exclude_loan_id=loan.id,  # אם זו אישור מחדש שלה
+            exclude_loan_id=loan.id,
         )
         if available < 1:
             raise HTTPException(
@@ -165,31 +257,28 @@ def approve_loan(
     loan.manager_notes = approval.manager_notes
     loan.approved_by = current_user.id
 
-    kit_name = loan.kit.name if loan.kit else "ערכה"
+    target_name = _loan_target_name(loan)
     log_activity(
         db,
         user_id=current_user.id,
         action="loan.approved",
         entity_type="loan",
         entity_id=loan.id,
-        description=f"{current_user.name} אישר השאלה של '{kit_name}' לסטודנט",
+        description=f"{current_user.name} אישר השאלה של '{target_name}' לסטודנט",
     )
     notify(
         db,
         user_id=loan.student_id,
         type_="loan_approved",
         title="בקשת ההשאלה אושרה ✓",
-        body=f"הבקשה שלך ל-'{kit_name}' אושרה",
+        body=f"הבקשה שלך ל-'{target_name}' אושרה",
         link="/student/loans",
     )
 
     db.commit()
     db.refresh(loan)
 
-    return db.query(models.LoanRequest).options(
-        joinedload(models.LoanRequest.student),
-        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment)
-    ).filter(models.LoanRequest.id == loan_id).first()
+    return _loans_query_with_relations(db).filter(models.LoanRequest.id == loan_id).first()
 
 
 @router.put("/{loan_id}/reject", response_model=schemas.LoanOut)
@@ -209,7 +298,7 @@ def reject_loan(
     loan.manager_notes = rejection.manager_notes
     loan.approved_by = current_user.id
 
-    kit_name = loan.kit.name if loan.kit else "ערכה"
+    target_name = _loan_target_name(loan)
     reason = rejection.manager_notes or ""
     log_activity(
         db,
@@ -217,24 +306,21 @@ def reject_loan(
         action="loan.rejected",
         entity_type="loan",
         entity_id=loan.id,
-        description=f"{current_user.name} דחה בקשה של '{kit_name}'" + (f" — {reason}" if reason else ""),
+        description=f"{current_user.name} דחה בקשה של '{target_name}'" + (f" — {reason}" if reason else ""),
     )
     notify(
         db,
         user_id=loan.student_id,
         type_="loan_rejected",
         title="בקשת ההשאלה נדחתה",
-        body=f"הבקשה ל-'{kit_name}'" + (f": {reason}" if reason else ""),
+        body=f"הבקשה ל-'{target_name}'" + (f": {reason}" if reason else ""),
         link="/student/loans",
     )
 
     db.commit()
     db.refresh(loan)
 
-    return db.query(models.LoanRequest).options(
-        joinedload(models.LoanRequest.student),
-        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment)
-    ).filter(models.LoanRequest.id == loan_id).first()
+    return _loans_query_with_relations(db).filter(models.LoanRequest.id == loan_id).first()
 
 
 @router.put("/{loan_id}/return", response_model=schemas.LoanOut)
@@ -252,31 +338,28 @@ def return_loan(
     loan.status = "returned"
     loan.return_date = datetime.utcnow()
 
-    kit_name = loan.kit.name if loan.kit else "ערכה"
+    target_name = _loan_target_name(loan)
     log_activity(
         db,
         user_id=current_user.id,
         action="loan.returned",
         entity_type="loan",
         entity_id=loan.id,
-        description=f"{current_user.name} סימן החזרה של '{kit_name}'",
+        description=f"{current_user.name} סימן החזרה של '{target_name}'",
     )
     notify(
         db,
         user_id=loan.student_id,
         type_="loan_returned",
         title="ההשאלה הוחזרה",
-        body=f"השאלת '{kit_name}' סומנה כהוחזרה",
+        body=f"השאלת '{target_name}' סומנה כהוחזרה",
         link="/student/loans",
     )
 
     db.commit()
     db.refresh(loan)
 
-    return db.query(models.LoanRequest).options(
-        joinedload(models.LoanRequest.student),
-        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment)
-    ).filter(models.LoanRequest.id == loan_id).first()
+    return _loans_query_with_relations(db).filter(models.LoanRequest.id == loan_id).first()
 
 
 @router.put("/{loan_id}/cancel", response_model=schemas.LoanOut)
@@ -295,20 +378,17 @@ def cancel_loan(
 
     loan.status = "cancelled"
 
-    kit_name = loan.kit.name if loan.kit else "ערכה"
+    target_name = _loan_target_name(loan)
     log_activity(
         db,
         user_id=current_user.id,
         action="loan.cancelled",
         entity_type="loan",
         entity_id=loan.id,
-        description=f"{current_user.name} ביטל בקשה של '{kit_name}'",
+        description=f"{current_user.name} ביטל בקשה של '{target_name}'",
     )
 
     db.commit()
     db.refresh(loan)
 
-    return db.query(models.LoanRequest).options(
-        joinedload(models.LoanRequest.student),
-        joinedload(models.LoanRequest.kit).joinedload(models.Kit.items).joinedload(models.KitItem.equipment)
-    ).filter(models.LoanRequest.id == loan_id).first()
+    return _loans_query_with_relations(db).filter(models.LoanRequest.id == loan_id).first()

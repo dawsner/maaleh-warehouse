@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { kitsAPI, loansAPI } from '../../api'
-import Modal from '../../components/Modal'
+import { useCart } from '../../contexts/CartContext'
+import { kitsAPI } from '../../api'
 
 const YEAR_NAMES = { 1: "א'", 2: "ב'", 3: "ג'", 4: "ד'" }
 
@@ -16,7 +17,7 @@ function YearBadge({ min, max }) {
   )
 }
 
-function KitCard({ kit, userYear, onRequest, avail }) {
+function KitCard({ kit, userYear, onAdd, avail, inCart }) {
   const eligible = userYear >= kit.min_year && userYear <= kit.max_year
   const canRequest = eligible && avail?.is_available
 
@@ -86,15 +87,20 @@ function KitCard({ kit, userYear, onRequest, avail }) {
         )}
 
         <button
-          onClick={() => onRequest(kit)}
-          disabled={!canRequest}
+          onClick={() => onAdd(kit)}
+          disabled={!canRequest || inCart}
           className={`mt-auto w-full py-2.5 rounded-xl font-bold text-sm transition-all
-            ${canRequest
-              ? 'bg-primary-600 hover:bg-primary-700 text-white shadow-sm'
-              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+            ${inCart
+              ? 'bg-green-100 text-green-700 cursor-default'
+              : canRequest
+                ? 'bg-primary-600 hover:bg-primary-700 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
             }`}
         >
-          {!eligible ? 'לא זמין לשנתך' : !avail?.is_available ? 'לא זמין כרגע' : 'בקש השאלה'}
+          {!eligible ? 'לא זמין לשנתך'
+            : !avail?.is_available ? 'לא זמין כרגע'
+            : inCart ? '✓ בהזמנה'
+            : '🛒 הוסף להזמנה'}
         </button>
       </div>
     </div>
@@ -103,16 +109,12 @@ function KitCard({ kit, userYear, onRequest, avail }) {
 
 export default function BrowseKits() {
   const { user } = useAuth()
+  const cart = useCart()
   const [kits, setKits] = useState([])
   const [availability, setAvailability] = useState({})
   const [loading, setLoading] = useState(true)
   const [categoryFilter, setCategoryFilter] = useState('')
-  const [requestModal, setRequestModal] = useState(null)
-  const [notes, setNotes] = useState('')
-  const [preferredDate, setPreferredDate] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess] = useState('')
-  const [error, setError] = useState('')
+  const [added, setAdded] = useState(null) // למעבר toast קצר
 
   useEffect(() => {
     Promise.all([
@@ -127,42 +129,34 @@ export default function BrowseKits() {
   const categories = [...new Set(kits.map(k => k.category))]
   const filtered = categoryFilter ? kits.filter(k => k.category === categoryFilter) : kits
 
-  const handleRequest = async () => {
-    if (!requestModal) return
-    setSubmitting(true)
-    setError('')
-    try {
-      await loansAPI.create({
-        kit_id: requestModal.id,
-        notes: notes || null,
-        preferred_date: preferredDate ? new Date(preferredDate).toISOString() : null,
-      })
-      setSuccess(`בקשת ההשאלה עבור "${requestModal.name}" נשלחה בהצלחה!`)
-      setRequestModal(null)
-      setNotes('')
-      setPreferredDate('')
-    } catch (e) {
-      setError(e.response?.data?.detail || 'שגיאה בשליחת הבקשה')
-    } finally {
-      setSubmitting(false)
-    }
+  const handleAdd = (kit) => {
+    cart.addKit(kit)
+    setAdded(kit.name)
+    setTimeout(() => setAdded(null), 2500)
   }
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="spinner" /></div>
 
   return (
     <div className="space-y-6" dir="rtl">
-      <div>
-        <h1 className="text-2xl font-extrabold text-slate-800">ערכות זמינות</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          ערכות המתאימות לשנה {YEAR_NAMES[user?.year]}' שלך
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-800">ערכות זמינות</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            ערכות המתאימות לשנה {YEAR_NAMES[user?.year]}' שלך
+          </p>
+        </div>
+        {cart.count > 0 && (
+          <Link to="/student/cart" className="bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm flex items-center gap-2">
+            🛒 להזמנה ({cart.count})
+          </Link>
+        )}
       </div>
 
-      {success && (
+      {added && (
         <div className="bg-green-50 border border-green-200 text-green-800 rounded-xl px-4 py-3 text-sm font-medium flex items-center gap-2">
-          <span>✅</span> {success}
-          <button onClick={() => setSuccess('')} className="mr-auto text-green-600 hover:text-green-800">✕</button>
+          <span>✅</span> "{added}" נוסף להזמנה
+          <Link to="/student/cart" className="mr-auto text-green-700 hover:text-green-900 underline font-bold">להזמנה ›</Link>
         </div>
       )}
 
@@ -195,65 +189,11 @@ export default function BrowseKits() {
             kit={kit}
             userYear={user?.year || 1}
             avail={availability[kit.id] || { is_available: false, count_available: 0 }}
-            onRequest={setRequestModal}
+            inCart={cart.has('kit', kit.id)}
+            onAdd={handleAdd}
           />
         ))}
       </div>
-
-      {/* Request Modal */}
-      <Modal
-        isOpen={!!requestModal}
-        onClose={() => { setRequestModal(null); setNotes(''); setPreferredDate(''); setError('') }}
-        title="בקשת השאלה"
-      >
-        {requestModal && (
-          <div className="space-y-4">
-            <div className="bg-primary-50 rounded-xl p-4">
-              <p className="font-bold text-primary-800 text-base">{requestModal.name}</p>
-              <p className="text-sm text-primary-600 mt-1">{requestModal.description}</p>
-            </div>
-
-            {error && <div className="bg-red-50 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>}
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך מבוקש (אופציונלי)</label>
-              <input
-                type="date"
-                value={preferredDate}
-                onChange={e => setPreferredDate(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">הערות (אופציונלי)</label>
-              <textarea
-                rows={3}
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="למה אתה צריך את הערכה? פרויקט, תרגיל..."
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 resize-none"
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handleRequest}
-                disabled={submitting}
-                className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-bold py-2.5 rounded-xl transition-all disabled:opacity-60"
-              >
-                {submitting ? 'שולח בקשה...' : '📤 שלח בקשה'}
-              </button>
-              <button
-                onClick={() => { setRequestModal(null); setNotes(''); setPreferredDate('') }}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl transition-all"
-              >
-                ביטול
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

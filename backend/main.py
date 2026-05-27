@@ -1,6 +1,8 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import text, inspect
 from database import engine, Base
 import models
@@ -20,6 +22,19 @@ def _run_migrations():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE equipment ADD COLUMN image_url VARCHAR"))
             print("[migration] Added equipment.image_url")
+
+    if 'loan_requests' in inspector.get_table_names():
+        cols = {c['name'] for c in inspector.get_columns('loan_requests')}
+        with engine.begin() as conn:
+            if 'equipment_id' not in cols:
+                conn.execute(text("ALTER TABLE loan_requests ADD COLUMN equipment_id INTEGER REFERENCES equipment(id)"))
+                print("[migration] Added loan_requests.equipment_id")
+            if 'quantity' not in cols:
+                conn.execute(text("ALTER TABLE loan_requests ADD COLUMN quantity INTEGER DEFAULT 1"))
+                print("[migration] Added loan_requests.quantity")
+            if 'batch_id' not in cols:
+                conn.execute(text("ALTER TABLE loan_requests ADD COLUMN batch_id VARCHAR"))
+                print("[migration] Added loan_requests.batch_id")
 
 
 try:
@@ -96,11 +111,39 @@ app.include_router(reports.router)
 app.include_router(exports.router)
 
 
-@app.get("/")
-def root():
-    return {"message": "מחסן מעלה - מערכת ניהול השאלות", "version": "1.0.0"}
-
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---- Serve built React frontend (single-service deploy) ---------------------
+# כשמריצים backend+frontend כשירות יחיד (Railway/Render/VPS), FastAPI מגיש את
+# קבצי React שנבנו (frontend/dist). אם התקיה לא קיימת — פשוט נדלג בלי לקרוס.
+_FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+_FRONTEND_DIST = os.path.abspath(_FRONTEND_DIST)
+
+if os.path.isdir(_FRONTEND_DIST):
+    # Static assets (JS, CSS, images) under /assets/*
+    _assets_dir = os.path.join(_FRONTEND_DIST, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/")
+    def _serve_root():
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+
+    # SPA fallback — כל route שלא תפס API מוחזר ל-index.html (React Router).
+    # חשוב: זה רץ אחרי כל ה-include_router, אז API קודם.
+    @app.get("/{full_path:path}")
+    def _spa_fallback(full_path: str):
+        # אם זה קובץ שקיים פיזית ב-dist (favicon, robots.txt וכו') — תגיש אותו
+        candidate = os.path.join(_FRONTEND_DIST, full_path)
+        if os.path.isfile(candidate):
+            return FileResponse(candidate)
+        # אחרת — index.html כדי ש-React Router יטפל
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+else:
+    @app.get("/")
+    def _root_no_frontend():
+        return {"message": "מחסן מעלה - מערכת ניהול השאלות", "version": "1.0.0",
+                "note": "frontend/dist not found — run `npm run build` in frontend/"}

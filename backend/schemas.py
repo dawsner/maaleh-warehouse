@@ -155,7 +155,24 @@ class KitAvailability(BaseModel):
 
 # Loan schemas
 class LoanRequestCreate(BaseModel):
-    kit_id: int
+    """תאימות אחורה: יצירת בקשה לערכה בודדת."""
+    kit_id: Optional[int] = None
+    equipment_id: Optional[int] = None  # חדש: ניתן לבקש פריט בודד
+    quantity: int = 1
+    notes: Optional[str] = None
+    preferred_date: Optional[datetime] = None
+
+
+class LoanBatchItem(BaseModel):
+    """פריט בעגלה — או ערכה או ציוד."""
+    kit_id: Optional[int] = None
+    equipment_id: Optional[int] = None
+    quantity: int = 1
+
+
+class LoanBatchCreate(BaseModel):
+    """שליחה של עגלת קניות שלמה — כמה ערכות ופריטים יחד."""
+    items: List[LoanBatchItem]
     notes: Optional[str] = None
     preferred_date: Optional[datetime] = None
 
@@ -173,7 +190,10 @@ class LoanReject(BaseModel):
 class LoanOut(BaseModel):
     id: int
     student_id: int
-    kit_id: int
+    kit_id: Optional[int] = None
+    equipment_id: Optional[int] = None
+    quantity: int = 1
+    batch_id: Optional[str] = None
     status: str
     requested_at: datetime
     loan_date: Optional[datetime] = None
@@ -185,6 +205,7 @@ class LoanOut(BaseModel):
     preferred_date: Optional[datetime] = None
     student: Optional[UserOut] = None
     kit: Optional[KitOut] = None
+    equipment: Optional[EquipmentOut] = None
     is_overdue: bool = False
     days_overdue: int = 0
 

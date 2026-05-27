@@ -78,7 +78,11 @@ class LoanRequest(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    kit_id = Column(Integer, ForeignKey("kits.id"), nullable=False)
+    # אחד מהשניים חייב להיות מאוכלס: kit_id (השאלת ערכה) או equipment_id (פריט בודד)
+    kit_id = Column(Integer, ForeignKey("kits.id"), nullable=True)
+    equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=True)
+    quantity = Column(Integer, default=1)  # רלוונטי בעיקר ל-equipment_id (כמה פריטים)
+    batch_id = Column(String, nullable=True, index=True)  # מקבץ של השאלות שנשלחו ביחד (UUID)
     status = Column(String, default="pending")  # pending/approved/active/returned/rejected/cancelled
     requested_at = Column(DateTime, default=datetime.utcnow)
     loan_date = Column(DateTime, nullable=True)
@@ -92,6 +96,7 @@ class LoanRequest(Base):
     student = relationship("User", back_populates="loans", foreign_keys=[student_id])
     approved_by_user = relationship("User", back_populates="approved_loans", foreign_keys=[approved_by])
     kit = relationship("Kit", back_populates="loans")
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
 
 
 class ActivityLog(Base):

@@ -163,7 +163,11 @@ export default function LoansPage() {
               ${loan.is_overdue ? 'border-rose-200 bg-rose-50/30' : 'border-slate-100'}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-slate-800 text-sm">{loan.kit?.name}</p>
+                  <p className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    <span>{loan.kit ? '🎒' : '📦'}</span>
+                    <span className="truncate">{loan.kit?.name || loan.equipment?.name || 'פריט'}</span>
+                    {!loan.kit && loan.quantity > 1 && <span className="text-xs text-slate-500">×{loan.quantity}</span>}
+                  </p>
                   <p className="text-xs text-slate-500">{loan.student?.name} · {yearLabel(loan.student?.year)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -241,7 +245,7 @@ export default function LoansPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  {['סטודנט', 'שנה', 'ערכה', 'בקשה', 'תאריך השאלה', 'תאריך החזרה', 'סטטוס', 'פעולות'].map(h => (
+                  {['סטודנט', 'שנה', 'ערכה / פריט', 'בקשה', 'תאריך השאלה', 'תאריך החזרה', 'סטטוס', 'פעולות'].map(h => (
                     <th key={h} className="text-right text-xs font-semibold text-slate-500 px-4 py-3">{h}</th>
                   ))}
                 </tr>
@@ -255,7 +259,14 @@ export default function LoansPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">{yearLabel(loan.student?.year)}</td>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-slate-700 text-sm">{loan.kit?.name}</p>
+                      <p className="font-medium text-slate-700 text-sm flex items-center gap-1.5">
+                        <span>{loan.kit ? '🎒' : '📦'}</span>
+                        <span>{loan.kit?.name || loan.equipment?.name || 'פריט'}</span>
+                        {!loan.kit && loan.quantity > 1 && <span className="text-xs text-slate-500">×{loan.quantity}</span>}
+                      </p>
+                      {loan.batch_id && (
+                        <p className="text-[10px] text-slate-400 mt-0.5">חלק מבקשה מקובצת</p>
+                      )}
                       {loan.notes && <p className="text-xs text-slate-400 mt-0.5">"{loan.notes}"</p>}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-500">{fmtDate(loan.requested_at)}</td>

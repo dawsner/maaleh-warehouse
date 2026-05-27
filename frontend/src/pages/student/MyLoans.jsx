@@ -24,6 +24,12 @@ function LoanCard({ loan, onCancel }) {
     ? 'border-rose-300 bg-rose-50/40'
     : (statusColors[loan.status] || 'border-slate-200')
 
+  const isKit = !!loan.kit
+  const title = loan.kit?.name || loan.equipment?.name || 'פריט'
+  const subtitle = loan.kit?.description || (loan.equipment ? `${loan.equipment.manufacturer || ''} ${loan.equipment.model_name || ''}`.trim() : '')
+  const typeIcon = isKit ? '🎒' : '📦'
+  const typeLabel = isKit ? 'ערכה' : 'פריט בודד'
+
   return (
     <div className={`bg-white rounded-2xl border-2 p-5 space-y-4 transition-all ${borderClass}`}>
       {/* Overdue banner */}
@@ -35,12 +41,21 @@ function LoanCard({ loan, onCancel }) {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <h3 className="font-bold text-slate-800 text-base">{loan.kit?.name}</h3>
-          <p className="text-sm text-slate-500 mt-0.5">{loan.kit?.description}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">{typeIcon}</span>
+            <h3 className="font-bold text-slate-800 text-base">{title}</h3>
+            {!isKit && loan.quantity > 1 && (
+              <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-xs font-bold">×{loan.quantity}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded">{typeLabel}</span>
+            {subtitle && <span className="text-sm text-slate-500 truncate">{subtitle}</span>}
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <StatusBadge status={loan.status} />
           {loan.is_overdue && (
             <span className="inline-block px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[10px] font-bold">
@@ -164,7 +179,8 @@ export default function MyLoans() {
   }, [tab])
 
   const handleCancel = async (loan) => {
-    if (!confirm(`האם לבטל את בקשת ההשאלה עבור "${loan.kit?.name}"?`)) return
+    const name = loan.kit?.name || loan.equipment?.name || 'הפריט'
+    if (!confirm(`האם לבטל את בקשת ההשאלה עבור "${name}"?`)) return
     try {
       await loansAPI.cancel(loan.id)
       load()

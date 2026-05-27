@@ -1,6 +1,11 @@
 import axios from 'axios'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// בפיתוח: דיפולט ל-localhost:8000.
+// ב-production (Railway/VPS): כשאין VITE_API_URL → URL יחסי, כי אותו שרת מגיש גם API וגם frontend.
+const _isDev = import.meta.env.DEV
+const API_BASE = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL
+  : (_isDev ? 'http://localhost:8000' : '')
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -81,8 +86,7 @@ export const exportsAPI = {
   // Receipt as printable HTML — opens in new tab. Includes token via query string fallback.
   loanReceiptUrl: (id) => {
     const token = localStorage.getItem('token')
-    const base = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    return `${base}/exports/loan/${id}/receipt?token=${encodeURIComponent(token || '')}`
+    return `${API_BASE}/exports/loan/${id}/receipt?token=${encodeURIComponent(token || '')}`
   },
   openLoanReceipt: (id) => {
     // Use the API with proper Authorization header by fetching as blob and opening
@@ -120,6 +124,7 @@ export const kitsAPI = {
 export const loansAPI = {
   getAll: (params) => api.get('/loans', { params }),
   create: (data) => api.post('/loans', data),
+  createBatch: (data) => api.post('/loans/batch', data),
   approve: (id, data, force = false) => api.put(`/loans/${id}/approve${force ? '?force=true' : ''}`, data),
   reject: (id, data) => api.put(`/loans/${id}/reject`, data),
   return: (id) => api.put(`/loans/${id}/return`),

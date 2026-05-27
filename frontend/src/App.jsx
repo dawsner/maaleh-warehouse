@@ -1,6 +1,7 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { CartProvider } from './contexts/CartContext'
 
 // Pages
 import Login from './pages/Login'
@@ -11,6 +12,8 @@ import LoansPage from './pages/manager/LoansPage'
 import StudentsPage from './pages/manager/StudentsPage'
 import StudentDashboard from './pages/student/StudentDashboard'
 import BrowseKits from './pages/student/BrowseKits'
+import BrowseEquipment from './pages/student/BrowseEquipment'
+import Cart from './pages/student/Cart'
 import MyLoans from './pages/student/MyLoans'
 
 // Layout
@@ -38,45 +41,49 @@ function ProtectedRoute({ children, requiredRole }) {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<RootRedirect />} />
+      <CartProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<RootRedirect />} />
 
-          {/* Manager routes */}
-          <Route
-            path="/manager"
-            element={
-              <ProtectedRoute requiredRole="admin">
-                <Layout role="admin" />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<ManagerDashboard />} />
-            <Route path="equipment" element={<EquipmentPage />} />
-            <Route path="kits" element={<KitsPage />} />
-            <Route path="loans" element={<LoansPage />} />
-            <Route path="students" element={<StudentsPage />} />
-          </Route>
+            {/* Manager routes */}
+            <Route
+              path="/manager"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <Layout role="admin" />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<ManagerDashboard />} />
+              <Route path="equipment" element={<EquipmentPage />} />
+              <Route path="kits" element={<KitsPage />} />
+              <Route path="loans" element={<LoansPage />} />
+              <Route path="students" element={<StudentsPage />} />
+            </Route>
 
-          {/* Student routes */}
-          <Route
-            path="/student"
-            element={
-              <ProtectedRoute requiredRole="student">
-                <Layout role="student" />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<StudentDashboard />} />
-            <Route path="browse" element={<BrowseKits />} />
-            <Route path="loans" element={<MyLoans />} />
-          </Route>
+            {/* Student routes */}
+            <Route
+              path="/student"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <Layout role="student" />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<StudentDashboard />} />
+              <Route path="browse" element={<BrowseKits />} />
+              <Route path="equipment" element={<BrowseEquipment />} />
+              <Route path="cart" element={<Cart />} />
+              <Route path="loans" element={<MyLoans />} />
+            </Route>
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </CartProvider>
     </AuthProvider>
   )
 }
