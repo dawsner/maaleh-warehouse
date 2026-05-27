@@ -24,7 +24,8 @@ def _run_migrations():
             print("[migration] Added equipment.image_url")
 
     if 'loan_requests' in inspector.get_table_names():
-        cols = {c['name'] for c in inspector.get_columns('loan_requests')}
+        cols_info = inspector.get_columns('loan_requests')
+        cols = {c['name'] for c in cols_info}
         with engine.begin() as conn:
             if 'equipment_id' not in cols:
                 conn.execute(text("ALTER TABLE loan_requests ADD COLUMN equipment_id INTEGER REFERENCES equipment(id)"))
@@ -35,6 +36,46 @@ def _run_migrations():
             if 'batch_id' not in cols:
                 conn.execute(text("ALTER TABLE loan_requests ADD COLUMN batch_id VARCHAR"))
                 print("[migration] Added loan_requests.batch_id")
+
+        # SQLite לא תומך ב-ALTER COLUMN. אם kit_id עוד מוגדר NOT NULL — בונים מחדש את הטבלה.
+        kit_col = next((c for c in cols_info if c['name'] == 'kit_id'), None)
+        if kit_col and not kit_col.get('nullable', True):
+            print("[migration] Rebuilding loan_requests to make kit_id nullable...")
+            with engine.begin() as conn:
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                conn.execute(text("""
+                    CREATE TABLE loan_requests_new (
+                        id INTEGER PRIMARY KEY,
+                        student_id INTEGER NOT NULL REFERENCES users(id),
+                        kit_id INTEGER REFERENCES kits(id),
+                        equipment_id INTEGER REFERENCES equipment(id),
+                        quantity INTEGER DEFAULT 1,
+                        batch_id VARCHAR,
+                        status VARCHAR DEFAULT 'pending',
+                        requested_at DATETIME,
+                        loan_date DATETIME,
+                        due_date DATETIME,
+                        return_date DATETIME,
+                        notes TEXT,
+                        manager_notes TEXT,
+                        approved_by INTEGER REFERENCES users(id),
+                        preferred_date DATETIME
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO loan_requests_new
+                    (id, student_id, kit_id, equipment_id, quantity, batch_id,
+                     status, requested_at, loan_date, due_date, return_date,
+                     notes, manager_notes, approved_by, preferred_date)
+                    SELECT id, student_id, kit_id, equipment_id, quantity, batch_id,
+                           status, requested_at, loan_date, due_date, return_date,
+                           notes, manager_notes, approved_by, preferred_date
+                    FROM loan_requests
+                """))
+                conn.execute(text("DROP TABLE loan_requests"))
+                conn.execute(text("ALTER TABLE loan_requests_new RENAME TO loan_requests"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+            print("[migration] loan_requests rebuilt — kit_id now nullable")
 
 
 try:
