@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { usersAPI, loansAPI, reportsAPI, activityAPI } from '../../api'
+import { usersAPI, ordersAPI, reportsAPI, activityAPI } from '../../api'
 import StatusBadge from '../../components/StatusBadge'
 import { format } from 'date-fns'
 
@@ -32,7 +32,7 @@ export default function ManagerDashboard() {
       try {
         const [statsRes, loansRes, reportRes, activityRes] = await Promise.all([
           usersAPI.getStats(),
-          loansAPI.getAll({ status: 'pending' }),
+          ordersAPI.getAll({ status: 'pending' }),
           reportsAPI.getOverview().catch(() => ({ data: null })),
           activityAPI.getAll({ limit: 8 }).catch(() => ({ data: [] })),
         ])
@@ -88,22 +88,66 @@ export default function ManagerDashboard() {
           label="השאלות פתוחות"
           value={stats?.open_loans ?? 0}
           color="bg-amber-50"
-          onClick={() => navigate('/manager/loans')}
+          onClick={() => navigate('/manager/orders')}
         />
         <StatCard
           icon="⏳"
           label="בקשות ממתינות"
           value={stats?.pending_requests ?? 0}
           color="bg-red-50"
-          onClick={() => navigate('/manager/loans')}
+          onClick={() => navigate('/manager/orders')}
         />
         <StatCard
           icon="⚠️"
           label="באיחור"
           value={stats?.overdue_loans ?? 0}
           color="bg-rose-100"
-          onClick={() => navigate('/manager/loans?tab=overdue')}
+          onClick={() => navigate('/manager/orders?tab=overdue')}
         />
+      </div>
+
+      {/* Quick actions row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <button
+          onClick={() => navigate('/manager/equipment')}
+          className="bg-white hover:bg-blue-50 border-2 border-dashed border-blue-200 rounded-xl p-4 flex items-center gap-3 transition-all text-right"
+        >
+          <span className="text-2xl">➕</span>
+          <div>
+            <div className="font-bold text-slate-800 text-sm">הוסף ציוד</div>
+            <div className="text-xs text-slate-500">פריט חדש למחסן</div>
+          </div>
+        </button>
+        <button
+          onClick={() => navigate('/manager/kits')}
+          className="bg-white hover:bg-purple-50 border-2 border-dashed border-purple-200 rounded-xl p-4 flex items-center gap-3 transition-all text-right"
+        >
+          <span className="text-2xl">🎒</span>
+          <div>
+            <div className="font-bold text-slate-800 text-sm">בנה ערכה</div>
+            <div className="text-xs text-slate-500">צרף פריטים לערכה</div>
+          </div>
+        </button>
+        <button
+          onClick={() => navigate('/manager/students')}
+          className="bg-white hover:bg-green-50 border-2 border-dashed border-green-200 rounded-xl p-4 flex items-center gap-3 transition-all text-right"
+        >
+          <span className="text-2xl">👥</span>
+          <div>
+            <div className="font-bold text-slate-800 text-sm">סטודנטים</div>
+            <div className="text-xs text-slate-500">הוסף וערוך משתמשים</div>
+          </div>
+        </button>
+        <button
+          onClick={() => navigate('/manager/orders')}
+          className="bg-white hover:bg-amber-50 border-2 border-dashed border-amber-200 rounded-xl p-4 flex items-center gap-3 transition-all text-right"
+        >
+          <span className="text-2xl">📋</span>
+          <div>
+            <div className="font-bold text-slate-800 text-sm">הזמנות</div>
+            <div className="text-xs text-slate-500">בקשות לטיפול</div>
+          </div>
+        </button>
       </div>
 
       {/* Pending requests */}
@@ -114,7 +158,7 @@ export default function ManagerDashboard() {
             <p className="text-xs text-slate-500 mt-0.5">בקשות ההשאלה האחרונות שממתינות לטיפול</p>
           </div>
           <button
-            onClick={() => navigate('/manager/loans')}
+            onClick={() => navigate('/manager/orders')}
             className="text-sm text-primary-600 hover:text-primary-700 font-medium"
           >
             הצג הכל ←
@@ -134,28 +178,30 @@ export default function ManagerDashboard() {
                 <tr className="bg-slate-50">
                   <th className="text-right text-xs font-semibold text-slate-500 px-6 py-3">סטודנט</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שנה</th>
-                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">ערכה</th>
+                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פריטים</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">תאריך בקשה</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">סטטוס</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פעולה</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {pendingLoans.map((loan) => (
-                  <tr key={loan.id} className="hover:bg-slate-50 transition-colors">
+                {pendingLoans.map((order) => (
+                  <tr key={order.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4">
-                      <p className="font-medium text-slate-800 text-sm">{loan.student?.name}</p>
-                      <p className="text-xs text-slate-400">{loan.student?.email}</p>
+                      <p className="font-medium text-slate-800 text-sm">{order.student?.name}</p>
+                      <p className="text-xs text-slate-400">{order.student?.email}</p>
                     </td>
-                    <td className="px-4 py-4 text-sm text-slate-600">{yearLabel(loan.student?.year)}</td>
-                    <td className="px-4 py-4 text-sm text-slate-700 font-medium">{loan.kit?.name}</td>
+                    <td className="px-4 py-4 text-sm text-slate-600">{yearLabel(order.student?.year)}</td>
+                    <td className="px-4 py-4 text-sm text-slate-700 font-medium">
+                      הזמנה #{order.id} — {order.item_count} פריטים
+                    </td>
                     <td className="px-4 py-4 text-sm text-slate-500">
-                      {loan.requested_at ? format(new Date(loan.requested_at), 'dd/MM/yyyy') : '-'}
+                      {order.requested_at ? format(new Date(order.requested_at), 'dd/MM/yyyy') : '-'}
                     </td>
-                    <td className="px-4 py-4"><StatusBadge status={loan.status} /></td>
+                    <td className="px-4 py-4"><StatusBadge status={order.status} /></td>
                     <td className="px-4 py-4">
                       <button
-                        onClick={() => navigate('/manager/loans')}
+                        onClick={() => navigate(`/manager/orders/${order.id}`)}
                         className="text-xs bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1.5 rounded-lg font-medium transition-all"
                       >
                         טפל

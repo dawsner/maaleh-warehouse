@@ -9,13 +9,18 @@ function EquipmentPicker({ value, onChange, allEquipment }) {
   const ref = useRef(null)
 
   const selected = allEquipment.find(e => e.id === value)
-  const filtered = !search ? allEquipment :
-    allEquipment.filter(e =>
-      e.name.toLowerCase().includes(search.toLowerCase()) ||
-      e.category.toLowerCase().includes(search.toLowerCase()) ||
-      (e.manufacturer && e.manufacturer.toLowerCase().includes(search.toLowerCase())) ||
-      (e.tag_id && e.tag_id.toLowerCase().includes(search.toLowerCase()))
-    )
+  const q = (search || '').toLowerCase().trim()
+  const filtered = !q ? allEquipment :
+    allEquipment.filter(e => {
+      // הגנות מפני null/undefined בנתוני ציוד
+      return (
+        (e.name || '').toLowerCase().includes(q) ||
+        (e.category || '').toLowerCase().includes(q) ||
+        (e.manufacturer || '').toLowerCase().includes(q) ||
+        (e.model_name || '').toLowerCase().includes(q) ||
+        (e.tag_id || '').toLowerCase().includes(q)
+      )
+    })
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }

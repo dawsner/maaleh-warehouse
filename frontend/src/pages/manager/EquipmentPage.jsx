@@ -2,21 +2,44 @@ import React, { useState, useEffect } from 'react'
 import { equipmentAPI, exportsAPI, downloadBlob } from '../../api'
 import Modal from '../../components/Modal'
 
-const CATEGORIES = ['תאורה', 'סאונד', 'מצלמות', 'עדשות', 'חצובות', 'אביזרים', 'מוניטורים', 'וויירלס', 'מקליטים']
+const DEFAULT_CATEGORIES = ['תאורה', 'סאונד', 'מצלמות', 'עדשות', 'חצובות', 'אביזרים', 'מוניטורים', 'וויירלס', 'מקליטים']
 
-function EquipmentForm({ initial, onSubmit, onClose, loading }) {
+/** מיפוי קטגוריה → אייקון אוטומטי (ניתן להרחבה בהמשך). */
+const CATEGORY_ICON = {
+  'מצלמות': '📷', 'מצלמה': '📷', 'תאורה': '💡', 'סאונד': '🎙️',
+  'עדשות': '🔭', 'חצובות': '📐', 'אביזרים': '🔧', 'מוניטורים': '🖥️',
+  'וויירלס': '📡', 'מקליטים': '🎚️',
+}
+const iconForCategory = (cat) => CATEGORY_ICON[cat] || '📦'
+
+const YEAR_OPTIONS = [1, 2, 3, 4]
+
+function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories = [] }) {
   const [form, setForm] = useState({
     name: '', category: '', quantity: 1, insured: false,
     price: 0, location: '', manufacturer: '', model_name: '',
-    tag_id: '', image_url: '', notes: '', ...initial
+    tag_id: '', image_url: '', notes: '',
+    min_year: 1, max_year: 4,
+    ...initial
   })
   const [imgError, setImgError] = useState(false)
+  const [newCategory, setNewCategory] = useState('')
   const set = (k, v) => {
     if (k === 'image_url') setImgError(false)
     setForm(f => ({ ...f, [k]: v }))
   }
 
-  const handleSubmit = (e) => { e.preventDefault(); onSubmit(form) }
+  // איחוד קטגוריות ברירת-מחדל + הקיימות מה-DB
+  const allCategories = Array.from(new Set([...DEFAULT_CATEGORIES, ...existingCategories])).filter(Boolean)
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (form.category === '__new__') {
+      alert('יש לאשר את שם הקטגוריה החדשה לפני שמירה')
+      return
+    }
+    onSubmit(form)
+  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -27,12 +50,30 @@ function EquipmentForm({ initial, onSubmit, onClose, loading }) {
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500" />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1">קטגוריה *</label>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">קטגוריה * {form.category && <span className="text-base">{iconForCategory(form.category)}</span>}</label>
           <select required value={form.category} onChange={e => set('category', e.target.value)}
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
             <option value="">בחר קטגוריה</option>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            {allCategories.map(c => <option key={c} value={c}>{iconForCategory(c)} {c}</option>)}
+            <option value="__new__">+ קטגוריה חדשה...</option>
           </select>
+          {form.category === '__new__' && (
+            <div className="flex gap-2 mt-2">
+              <input
+                type="text"
+                value={newCategory}
+                onChange={e => setNewCategory(e.target.value)}
+                placeholder="שם קטגוריה חדשה"
+                className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => { if (newCategory.trim()) { set('category', newCategory.trim()); setNewCategory('') } }}
+                className="bg-primary-600 text-white text-sm font-bold px-3 py-2 rounded-lg"
+              >הוסף</button>
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-1">כמות *</label>
@@ -88,6 +129,20 @@ function EquipmentForm({ initial, onSubmit, onClose, loading }) {
           <label className="block text-sm font-semibold text-slate-700 mb-1">הערות</label>
           <textarea rows={2} value={form.notes || ''} onChange={e => set('notes', e.target.value)}
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 resize-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">משנה</label>
+          <select value={form.min_year} onChange={e => set('min_year', parseInt(e.target.value))}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
+            {YEAR_OPTIONS.map(y => <option key={y} value={y}>שנה {y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">עד שנה</label>
+          <select value={form.max_year} onChange={e => set('max_year', parseInt(e.target.value))}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
+            {YEAR_OPTIONS.filter(y => y >= form.min_year).map(y => <option key={y} value={y}>שנה {y}</option>)}
+          </select>
         </div>
         <div className="col-span-2">
           <label className="flex items-center gap-3 cursor-pointer">
@@ -460,6 +515,7 @@ export default function EquipmentPage() {
           onSubmit={handleSubmit}
           onClose={() => { setModalOpen(false); setEditItem(null) }}
           loading={submitting}
+          existingCategories={categories}
         />
       </Modal>
 

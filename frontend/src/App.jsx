@@ -9,12 +9,16 @@ import ManagerDashboard from './pages/manager/ManagerDashboard'
 import EquipmentPage from './pages/manager/EquipmentPage'
 import KitsPage from './pages/manager/KitsPage'
 import LoansPage from './pages/manager/LoansPage'
+import OrdersPage from './pages/manager/OrdersPage'
+import OrderDetailPage from './pages/manager/OrderDetailPage'
 import StudentsPage from './pages/manager/StudentsPage'
 import StudentDashboard from './pages/student/StudentDashboard'
 import BrowseKits from './pages/student/BrowseKits'
 import BrowseEquipment from './pages/student/BrowseEquipment'
 import Cart from './pages/student/Cart'
 import MyLoans from './pages/student/MyLoans'
+import MyOrders from './pages/student/MyOrders'
+import OrderDetail from './pages/student/OrderDetail'
 
 // Layout
 import Layout from './components/Layout'
@@ -59,6 +63,8 @@ function App() {
               <Route index element={<ManagerDashboard />} />
               <Route path="equipment" element={<EquipmentPage />} />
               <Route path="kits" element={<KitsPage />} />
+              <Route path="orders" element={<OrdersPage />} />
+              <Route path="orders/:id" element={<OrderDetailPage />} />
               <Route path="loans" element={<LoansPage />} />
               <Route path="students" element={<StudentsPage />} />
             </Route>
@@ -76,6 +82,8 @@ function App() {
               <Route path="browse" element={<BrowseKits />} />
               <Route path="equipment" element={<BrowseEquipment />} />
               <Route path="cart" element={<Cart />} />
+              <Route path="orders" element={<MyOrders />} />
+              <Route path="orders/:id" element={<OrderDetail />} />
               <Route path="loans" element={<MyLoans />} />
             </Route>
 

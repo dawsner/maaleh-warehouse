@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { loansAPI } from '../../api'
-import StatusBadge from '../../components/StatusBadge'
+import { ordersAPI } from '../../api'
 import { format } from 'date-fns'
 
 const YEAR_NAMES = { 1: "א'", 2: "ב'", 3: "ג'", 4: "ד'" }
@@ -11,13 +10,24 @@ const fmtDate = (d) => d ? format(new Date(d), 'dd/MM/yyyy') : '-'
 export default function StudentDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [loans, setLoans] = useState([])
+  const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+
+  const createOrder = async () => {
+    setCreating(true)
+    try {
+      const res = await ordersAPI.create({ items: [] })
+      navigate(`/student/orders/${res.data.id}`)
+    } catch (e) {
+      alert(e.response?.data?.detail || 'שגיאה')
+    } finally { setCreating(false) }
+  }
 
   const load = (silent = false) => {
     if (!silent) setLoading(true)
-    return loansAPI.getAll()
-      .then(r => setLoans(r.data))
+    return ordersAPI.getAll()
+      .then(r => setOrders(r.data))
       .catch(console.error)
       .finally(() => { if (!silent) setLoading(false) })
   }
@@ -35,9 +45,9 @@ export default function StudentDashboard() {
     }
   }, [])
 
-  const activeLoans = loans.filter(l => l.status === 'active')
-  const pendingLoans = loans.filter(l => l.status === 'pending')
-  const recentLoans = loans.slice(0, 4)
+  const activeOrders = orders.filter(o => o.status === 'active')
+  const pendingOrders = orders.filter(o => o.status === 'pending')
+  const recentOrders = orders.slice(0, 4)
 
   return (
     <div className="space-y-6" dir="rtl">
@@ -63,8 +73,8 @@ export default function StudentDashboard() {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-xl">📋</div>
             <div>
-              <p className="text-2xl font-extrabold text-slate-800">{activeLoans.length}</p>
-              <p className="text-xs text-slate-500 font-medium">השאלות פעילות</p>
+              <p className="text-2xl font-extrabold text-slate-800">{activeOrders.length}</p>
+              <p className="text-xs text-slate-500 font-medium">הזמנות פעילות</p>
             </div>
           </div>
         </div>
@@ -72,30 +82,31 @@ export default function StudentDashboard() {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-xl">⏳</div>
             <div>
-              <p className="text-2xl font-extrabold text-slate-800">{pendingLoans.length}</p>
-              <p className="text-xs text-slate-500 font-medium">בקשות ממתינות</p>
+              <p className="text-2xl font-extrabold text-slate-800">{pendingOrders.length}</p>
+              <p className="text-xs text-slate-500 font-medium">הזמנות ממתינות</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Quick action */}
+      {/* Quick action — צור הזמנה חדשה */}
       <button
-        onClick={() => navigate('/student/browse')}
-        className="w-full bg-primary-50 hover:bg-primary-100 border-2 border-primary-200 border-dashed rounded-2xl p-5 flex items-center justify-center gap-3 transition-all group"
+        onClick={createOrder}
+        disabled={creating}
+        className="w-full bg-primary-600 hover:bg-primary-700 text-white rounded-2xl p-5 flex items-center justify-center gap-3 transition-all shadow-sm disabled:opacity-60"
       >
-        <div className="w-10 h-10 bg-primary-600 group-hover:bg-primary-700 rounded-xl flex items-center justify-center text-white text-xl transition-all">🎒</div>
+        <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">+</div>
         <div className="text-right">
-          <p className="font-bold text-primary-700">בקש ערכה חדשה</p>
-          <p className="text-xs text-primary-500">צפה בכל הערכות הזמינות לשנה שלך</p>
+          <p className="font-bold text-base">הזמנה חדשה</p>
+          <p className="text-xs text-primary-100">בחר ערכות וציוד בטבלה אחת חיה</p>
         </div>
       </button>
 
-      {/* Recent loans */}
+      {/* Recent orders */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <h2 className="font-bold text-slate-800">ההשאלות האחרונות שלי</h2>
-          <button onClick={() => navigate('/student/loans')}
+          <h2 className="font-bold text-slate-800">ההזמנות האחרונות שלי</h2>
+          <button onClick={() => navigate('/student/orders')}
             className="text-sm text-primary-600 hover:text-primary-700 font-medium">
             הצג הכל ←
           </button>
@@ -103,25 +114,26 @@ export default function StudentDashboard() {
 
         {loading ? (
           <div className="flex items-center justify-center h-24"><div className="spinner" /></div>
-        ) : recentLoans.length === 0 ? (
+        ) : recentOrders.length === 0 ? (
           <div className="text-center py-10">
             <div className="text-4xl mb-2">📦</div>
-            <p className="text-slate-500 font-medium text-sm">אין השאלות עדיין</p>
+            <p className="text-slate-500 font-medium text-sm">אין הזמנות עדיין</p>
             <p className="text-slate-400 text-xs mt-1">לחץ על "בקש ערכה חדשה" להתחיל</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-50">
-            {recentLoans.map(loan => (
-              <div key={loan.id} className="flex items-center justify-between px-5 py-4">
+            {recentOrders.map(o => (
+              <Link key={o.id} to={`/student/orders/${o.id}`}
+                className="flex items-center justify-between px-5 py-4 hover:bg-slate-50">
                 <div>
-                  <p className="font-medium text-slate-800 text-sm">{loan.kit?.name}</p>
+                  <p className="font-medium text-slate-800 text-sm">הזמנה #{o.id} — {o.item_count} פריטים</p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {fmtDate(loan.requested_at)}
-                    {loan.due_date && loan.status === 'active' && ` · יעד החזרה: ${fmtDate(loan.due_date)}`}
+                    {fmtDate(o.requested_at)}
+                    {o.due_date && o.status === 'active' && ` · יעד החזרה: ${fmtDate(o.due_date)}`}
                   </p>
                 </div>
-                <StatusBadge status={loan.status} />
-              </div>
+                <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">{o.status}</span>
+              </Link>
             ))}
           </div>
         )}

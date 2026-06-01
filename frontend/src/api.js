@@ -120,7 +120,7 @@ export const kitsAPI = {
   delete: (id) => api.delete(`/kits/${id}`),
 }
 
-// Loans
+// Loans (legacy — נשמר לתאימות אחורה)
 export const loansAPI = {
   getAll: (params) => api.get('/loans', { params }),
   create: (data) => api.post('/loans', data),
@@ -129,6 +129,24 @@ export const loansAPI = {
   reject: (id, data) => api.put(`/loans/${id}/reject`, data),
   return: (id) => api.put(`/loans/${id}/return`),
   cancel: (id) => api.put(`/loans/${id}/cancel`),
+}
+
+// Orders — הארכיטקטורה החדשה (הזמנה = יחידה שמכילה מספר פריטים)
+export const ordersAPI = {
+  getAll: (params) => api.get('/orders', { params }),
+  getOne: (id) => api.get(`/orders/${id}`),
+  create: (data) => api.post('/orders', data),
+  update: (id, data) => api.put(`/orders/${id}`, data),
+  addItem: (id, item) => api.post(`/orders/${id}/items`, item),
+  updateItem: (id, itemId, data) => api.put(`/orders/${id}/items/${itemId}`, data),
+  removeItem: (id, itemId) => api.delete(`/orders/${id}/items/${itemId}`),
+  markItemReturned: (id, itemId) => api.put(`/orders/${id}/items/${itemId}`, { mark_returned: true }),
+  approve: (id, data, force = false) => api.put(`/orders/${id}/approve${force ? '?force=true' : ''}`, data),
+  reject: (id, data) => api.put(`/orders/${id}/reject`, data),
+  close: (id) => api.put(`/orders/${id}/close`),
+  cancel: (id) => api.put(`/orders/${id}/cancel`),
+  // בדיקת זמינות לטווח תאריכים — מחזיר {equipment: {id: {available, total}}, kits: {id: {available}}}
+  checkAvailability: (start, end) => api.get('/orders/availability/check', { params: { start, end } }),
 }
 
 // Users

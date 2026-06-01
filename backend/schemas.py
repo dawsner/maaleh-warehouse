@@ -64,6 +64,8 @@ class EquipmentBase(BaseModel):
     tag_id: Optional[str] = None
     image_url: Optional[str] = None
     notes: Optional[str] = None
+    min_year: int = 1
+    max_year: int = 4
 
 
 class EquipmentCreate(EquipmentBase):
@@ -84,6 +86,8 @@ class EquipmentUpdate(BaseModel):
     tag_id: Optional[str] = None
     image_url: Optional[str] = None
     notes: Optional[str] = None
+    min_year: Optional[int] = None
+    max_year: Optional[int] = None
     active: Optional[bool] = None
 
 
@@ -218,3 +222,97 @@ class DashboardStats(BaseModel):
     active_kits: int
     open_loans: int
     pending_requests: int
+
+
+# Order schemas (architecture חדש — מחליף את LoanRequest)
+class OrderItemCreate(BaseModel):
+    kit_id: Optional[int] = None
+    equipment_id: Optional[int] = None
+    quantity: int = 1
+
+
+class OrderItemUpdate(BaseModel):
+    quantity: Optional[int] = None
+    returned_at: Optional[datetime] = None
+    mark_returned: Optional[bool] = None  # קיצור — שולח True כדי לסמן עכשיו
+
+
+class OrderItemOut(BaseModel):
+    id: int
+    order_id: int
+    kit_id: Optional[int] = None
+    equipment_id: Optional[int] = None
+    quantity: int = 1
+    returned_at: Optional[datetime] = None
+    added_at: datetime
+    added_by: Optional[int] = None
+    kit: Optional[KitOut] = None
+    equipment: Optional[EquipmentOut] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CrewMember(BaseModel):
+    name: str
+    role: Optional[str] = None
+
+
+class OrderCreate(BaseModel):
+    """יצירת הזמנה ראשונית — אפשר עם או בלי פריטים."""
+    items: List[OrderItemCreate] = []
+    notes: Optional[str] = None
+    preferred_date: Optional[datetime] = None
+    loan_date: Optional[datetime] = None       # מ-
+    due_date: Optional[datetime] = None         # עד-
+    production_name: Optional[str] = None
+    crew: Optional[List[CrewMember]] = None
+
+
+class OrderUpdate(BaseModel):
+    """עדכון פרטי הזמנה — סטודנט יכול לעדכן notes/dates/production/crew; מנהל גם manager_notes."""
+    notes: Optional[str] = None
+    manager_notes: Optional[str] = None
+    preferred_date: Optional[datetime] = None
+    loan_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    production_name: Optional[str] = None
+    crew: Optional[List[CrewMember]] = None
+
+
+class OrderApprove(BaseModel):
+    loan_date: datetime
+    due_date: datetime
+    manager_notes: Optional[str] = None
+
+
+class OrderReject(BaseModel):
+    manager_notes: Optional[str] = None
+
+
+class OrderOut(BaseModel):
+    id: int
+    student_id: int
+    status: str
+    requested_at: datetime
+    preferred_date: Optional[datetime] = None
+    loan_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    production_name: Optional[str] = None
+    crew: Optional[List[CrewMember]] = None  # parsed JSON
+    notes: Optional[str] = None
+    manager_notes: Optional[str] = None
+    approved_by: Optional[int] = None
+    closed_by: Optional[int] = None
+    last_modified_at: datetime
+    student: Optional[UserOut] = None
+    items: List[OrderItemOut] = []
+    # שדות מחושבים
+    item_count: int = 0
+    returned_count: int = 0
+    is_overdue: bool = False
+    days_overdue: int = 0
+
+    class Config:
+        from_attributes = True

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../../contexts/CartContext'
-import { loansAPI } from '../../api'
+import { ordersAPI } from '../../api'
 
 /**
  * עמוד הזמנה.
@@ -10,8 +10,10 @@ import { loansAPI } from '../../api'
 export default function Cart() {
   const cart = useCart()
   const navigate = useNavigate()
+  const [productionName, setProductionName] = useState('')
+  const [loanDate, setLoanDate] = useState('')
+  const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
-  const [preferredDate, setPreferredDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -28,16 +30,22 @@ export default function Cart() {
         equipment_id: it.type === 'equipment' ? it.id : null,
         quantity: it.quantity || 1,
       }))
-      await loansAPI.createBatch({
+      const res = await ordersAPI.create({
         items,
+        production_name: productionName || null,
+        loan_date: loanDate ? new Date(loanDate).toISOString() : null,
+        due_date: dueDate ? new Date(dueDate).toISOString() : null,
         notes: notes || null,
-        preferred_date: preferredDate ? new Date(preferredDate).toISOString() : null,
       })
       cart.clear()
       setSuccess(true)
-      setTimeout(() => navigate('/student/loans'), 1500)
+      const newOrderId = res.data?.id
+      setTimeout(() => {
+        if (newOrderId) navigate(`/student/orders/${newOrderId}`)
+        else navigate('/student/orders')
+      }, 1500)
     } catch (e) {
-      setError(e.response?.data?.detail || 'שגיאה בשליחת הבקשה')
+      setError(e.response?.data?.detail || 'שגיאה בשליחת ההזמנה')
     } finally {
       setSubmitting(false)
     }
@@ -127,29 +135,52 @@ export default function Cart() {
             ))}
           </div>
 
-          {/* Notes + date */}
+          {/* Production details */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-4">
+            <h3 className="font-bold text-slate-800">פרטי הפקה</h3>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך מבוקש (אופציונלי)</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">שם הפקה</label>
               <input
-                type="date"
-                value={preferredDate}
-                onChange={e => setPreferredDate(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
+                type="text"
+                value={productionName}
+                onChange={e => setProductionName(e.target.value)}
+                placeholder='למשל: "בין הים לעיר"'
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500"
               />
-              <p className="text-xs text-slate-400 mt-1">תאריך מועדף לתחילת ההשאלה</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך מ-</label>
+                <input
+                  type="date"
+                  value={loanDate}
+                  onChange={e => setLoanDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך עד-</label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                  min={loanDate || new Date().toISOString().split('T')[0]}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">הערות (אופציונלי)</label>
               <textarea
-                rows={3}
+                rows={2}
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
-                placeholder="למה אתה צריך את הציוד? פרויקט, תרגיל..."
+                placeholder="פרויקט, הקשר, פרטים נוספים..."
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 resize-none"
               />
             </div>
+            <p className="text-xs text-slate-400">תוכל להוסיף אנשי צוות ולערוך פרטים נוספים בעמוד ההזמנה לאחר השליחה.</p>
           </div>
 
           {error && (

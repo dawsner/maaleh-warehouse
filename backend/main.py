@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -6,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text, inspect
 from database import engine, Base
 import models
-from routers import auth, equipment, kits, loans, users, activity, notifications, reports, exports
+from routers import auth, equipment, kits, loans, orders, users, activity, notifications, reports, exports
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -18,10 +19,26 @@ def _run_migrations():
     inspector = inspect(engine)
     if 'equipment' in inspector.get_table_names():
         cols = {c['name'] for c in inspector.get_columns('equipment')}
-        if 'image_url' not in cols:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if 'image_url' not in cols:
                 conn.execute(text("ALTER TABLE equipment ADD COLUMN image_url VARCHAR"))
-            print("[migration] Added equipment.image_url")
+                print("[migration] Added equipment.image_url")
+            if 'min_year' not in cols:
+                conn.execute(text("ALTER TABLE equipment ADD COLUMN min_year INTEGER DEFAULT 1"))
+                print("[migration] Added equipment.min_year")
+            if 'max_year' not in cols:
+                conn.execute(text("ALTER TABLE equipment ADD COLUMN max_year INTEGER DEFAULT 4"))
+                print("[migration] Added equipment.max_year")
+
+    if 'orders' in inspector.get_table_names():
+        cols = {c['name'] for c in inspector.get_columns('orders')}
+        with engine.begin() as conn:
+            if 'production_name' not in cols:
+                conn.execute(text("ALTER TABLE orders ADD COLUMN production_name VARCHAR"))
+                print("[migration] Added orders.production_name")
+            if 'crew' not in cols:
+                conn.execute(text("ALTER TABLE orders ADD COLUMN crew TEXT"))
+                print("[migration] Added orders.crew")
 
     if 'loan_requests' in inspector.get_table_names():
         cols_info = inspector.get_columns('loan_requests')
@@ -85,6 +102,88 @@ except Exception as _e:
     print(f"[migration] warning: {_e}")
 
 
+def _migrate_loans_to_orders():
+    """מיגרציה חד-פעמית של נתוני loan_requests הישנים למודל החדש (orders + order_items).
+    רץ רק אם orders ריק ויש נתונים ב-loan_requests.
+    מקבץ לפי batch_id (אם קיים) — כל batch_id → הזמנה אחת."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        if db.query(models.Order).count() > 0:
+            return  # כבר מיגרציה רצה
+        loans = db.query(models.LoanRequest).all()
+        if not loans:
+            return
+
+        groups: dict = {}
+        singletons: list = []
+        for ln in loans:
+            if ln.batch_id:
+                groups.setdefault(ln.batch_id, []).append(ln)
+            else:
+                singletons.append(ln)
+
+        # מיפוי סטטוס LoanRequest → Order
+        status_map = {
+            "pending": "pending",
+            "approved": "active",
+            "active": "active",
+            "returned": "closed",
+            "rejected": "rejected",
+            "cancelled": "cancelled",
+        }
+
+        def _build_order(ln_list):
+            primary = ln_list[0]
+            order_status = status_map.get(primary.status, "pending")
+            order = models.Order(
+                student_id=primary.student_id,
+                status=order_status,
+                requested_at=primary.requested_at,
+                preferred_date=primary.preferred_date,
+                loan_date=primary.loan_date,
+                due_date=primary.due_date,
+                closed_at=primary.return_date if order_status == "closed" else None,
+                notes=primary.notes,
+                manager_notes=primary.manager_notes,
+                approved_by=primary.approved_by,
+                last_modified_at=primary.requested_at or datetime.utcnow(),
+            )
+            db.add(order)
+            db.flush()
+            for ln in ln_list:
+                oi = models.OrderItem(
+                    order_id=order.id,
+                    kit_id=ln.kit_id,
+                    equipment_id=ln.equipment_id,
+                    quantity=ln.quantity or 1,
+                    returned_at=ln.return_date,
+                    added_by=ln.student_id,
+                    added_at=ln.requested_at or datetime.utcnow(),
+                )
+                db.add(oi)
+            return order
+
+        for batch_loans in groups.values():
+            _build_order(batch_loans)
+        for ln in singletons:
+            _build_order([ln])
+
+        db.commit()
+        print(f"[migration] migrated {len(loans)} loan_requests into {len(groups) + len(singletons)} orders")
+    except Exception as e:
+        print(f"[migration] migrate-loans error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+try:
+    _migrate_loans_to_orders()
+except Exception as _e:
+    print(f"[migration] loans→orders warning: {_e}")
+
+
 def _seed_if_empty():
     """אם ה-DB ריק לחלוטין (אין משתמשים) — מריץ את ה-seed.
     שימושי בעיקר ב-deploy ראשון (Render / VPS), כדי שלא תהיה דרישה ידנית."""
@@ -145,6 +244,7 @@ app.include_router(auth.router)
 app.include_router(equipment.router)
 app.include_router(kits.router)
 app.include_router(loans.router)
+app.include_router(orders.router)
 app.include_router(users.router)
 app.include_router(activity.router)
 app.include_router(notifications.router)

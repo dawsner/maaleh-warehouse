@@ -8,16 +8,13 @@ const managerNav = [
   { to: '/manager', label: 'לוח בקרה', icon: '📊', end: true },
   { to: '/manager/equipment', label: 'ציוד', icon: '📦' },
   { to: '/manager/kits', label: 'ערכות', icon: '🎒' },
-  { to: '/manager/loans', label: 'השאלות', icon: '📋' },
+  { to: '/manager/orders', label: 'הזמנות', icon: '📋' },
   { to: '/manager/students', label: 'סטודנטים', icon: '👥' },
 ]
 
 const studentNav = [
   { to: '/student', label: 'לוח בקרה', icon: '🏠', end: true },
-  { to: '/student/browse', label: 'ערכות', icon: '🎒' },
-  { to: '/student/equipment', label: 'ציוד בודד', icon: '📦' },
-  { to: '/student/cart', label: 'הזמנה', icon: '🛒', cartBadge: true },
-  { to: '/student/loans', label: 'ההשאלות שלי', icon: '📋' },
+  { to: '/student/orders', label: 'ההזמנות שלי', icon: '📋' },
 ]
 
 export default function Sidebar({ role, isOpen, onClose }) {
