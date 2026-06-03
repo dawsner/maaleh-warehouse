@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
-from typing import Optional, List
+import json
+from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
+from typing import Optional, List, Any
 from datetime import datetime
 
 
@@ -316,3 +317,20 @@ class OrderOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_validator('crew', mode='before')
+    @classmethod
+    def _parse_crew(cls, v: Any):
+        """ה-DB שומר את crew כ-TEXT JSON. אם זה string — נפרק לרשימה."""
+        if v is None or isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            try:
+                parsed = json.loads(s)
+                return parsed if isinstance(parsed, list) else None
+            except Exception:
+                return None
+        return v

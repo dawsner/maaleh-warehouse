@@ -269,9 +269,16 @@ if os.path.isdir(_FRONTEND_DIST):
     if os.path.isdir(_assets_dir):
         app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
 
+    # Headers שמונעים cache ל-index.html. הקבצים ב-assets/ עם hash בשם, אז הם בטוחים לקאש.
+    _NO_CACHE_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     @app.get("/")
     def _serve_root():
-        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"), headers=_NO_CACHE_HEADERS)
 
     # SPA fallback — כל route שלא תפס API מוחזר ל-index.html (React Router).
     # חשוב: זה רץ אחרי כל ה-include_router, אז API קודם.
@@ -280,9 +287,12 @@ if os.path.isdir(_FRONTEND_DIST):
         # אם זה קובץ שקיים פיזית ב-dist (favicon, robots.txt וכו') — תגיש אותו
         candidate = os.path.join(_FRONTEND_DIST, full_path)
         if os.path.isfile(candidate):
+            # ל-index.html ובאפיון .html כללי לא מקאשים. השאר בקאש קצר.
+            if candidate.endswith(".html"):
+                return FileResponse(candidate, headers=_NO_CACHE_HEADERS)
             return FileResponse(candidate)
         # אחרת — index.html כדי ש-React Router יטפל
-        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"), headers=_NO_CACHE_HEADERS)
 else:
     @app.get("/")
     def _root_no_frontend():
