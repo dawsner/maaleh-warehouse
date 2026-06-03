@@ -196,19 +196,21 @@ export default function OrderDetailPage() {
     crew: [],
   })
 
-  const load = async (silent = false) => {
+  const load = async (silent = false, resetDraft = false) => {
     if (!silent) setLoading(true)
     try {
       const res = await ordersAPI.getOne(id)
       setOrder(res.data)
-      setDraft({
-        production_name: res.data.production_name || '',
-        notes: res.data.notes || '',
-        manager_notes: res.data.manager_notes || '',
-        loan_date: res.data.loan_date ? res.data.loan_date.slice(0, 10) : '',
-        due_date: res.data.due_date ? res.data.due_date.slice(0, 10) : '',
-        crew: res.data.crew || [],
-      })
+      if (!silent || resetDraft) {
+        setDraft({
+          production_name: res.data.production_name || '',
+          notes: res.data.notes || '',
+          manager_notes: res.data.manager_notes || '',
+          loan_date: res.data.loan_date ? res.data.loan_date.slice(0, 10) : '',
+          due_date: res.data.due_date ? res.data.due_date.slice(0, 10) : '',
+          crew: res.data.crew || [],
+        })
+      }
     } catch (e) { setError(e.response?.data?.detail || 'שגיאה') }
     finally { if (!silent) setLoading(false) }
   }
@@ -266,16 +268,21 @@ export default function OrderDetailPage() {
   const saveDetails = async () => {
     setSavingDetails(true)
     try {
+      const cleanCrew = (draft.crew || []).filter(c => (c.name || '').trim())
       await ordersAPI.update(id, {
         production_name: draft.production_name || null,
         notes: draft.notes || null,
         manager_notes: draft.manager_notes || null,
         loan_date: draft.loan_date ? new Date(draft.loan_date).toISOString() : null,
         due_date: draft.due_date ? new Date(draft.due_date).toISOString() : null,
-        crew: draft.crew,
+        crew: cleanCrew,
       })
-      load(true)
-    } catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+      await load(true, true)
+      alert('הפרטים נשמרו ✓')
+    } catch (e) {
+      const detail = e.response?.data?.detail
+      alert(typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail) || 'שגיאה'))
+    }
     finally { setSavingDetails(false) }
   }
 

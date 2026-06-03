@@ -121,18 +121,25 @@ export default function OrderDetail() {
     crew: [],
   })
 
-  const load = async (silent = false) => {
+  /**
+   * טעינת ההזמנה.
+   * silent=true (פולינג): טוען את ה-order, אבל לא דורס את draft של המשתמש כדי לא לאבד הקלדה באמצע.
+   * silent=false (טעינה ראשונית): מאתחל גם את draft.
+   */
+  const load = async (silent = false, resetDraft = false) => {
     if (!silent) setLoading(true)
     try {
       const res = await ordersAPI.getOne(id)
       setOrder(res.data)
-      setDraft({
-        production_name: res.data.production_name || '',
-        notes: res.data.notes || '',
-        loan_date: res.data.loan_date ? res.data.loan_date.slice(0, 10) : '',
-        due_date: res.data.due_date ? res.data.due_date.slice(0, 10) : '',
-        crew: res.data.crew || [],
-      })
+      if (!silent || resetDraft) {
+        setDraft({
+          production_name: res.data.production_name || '',
+          notes: res.data.notes || '',
+          loan_date: res.data.loan_date ? res.data.loan_date.slice(0, 10) : '',
+          due_date: res.data.due_date ? res.data.due_date.slice(0, 10) : '',
+          crew: res.data.crew || [],
+        })
+      }
     } catch (e) {
       setError(e.response?.data?.detail || 'שגיאה בטעינה')
     } finally { if (!silent) setLoading(false) }
@@ -198,16 +205,20 @@ export default function OrderDetail() {
   const saveDetails = async () => {
     setSavingDetails(true)
     try {
+      // סינון שורות צוות ריקות (שם חובה ל-pydantic)
+      const cleanCrew = (draft.crew || []).filter(c => (c.name || '').trim())
       await ordersAPI.update(id, {
         production_name: draft.production_name || null,
         notes: draft.notes || null,
         loan_date: draft.loan_date ? new Date(draft.loan_date).toISOString() : null,
         due_date: draft.due_date ? new Date(draft.due_date).toISOString() : null,
-        crew: draft.crew,
+        crew: cleanCrew,
       })
-      load(true)
+      await load(true, true)  // resetDraft אחרי שמירה כדי לסנכרן עם השרת
+      alert('הפרטים נשמרו בהצלחה ✓')
     } catch (e) {
-      alert(e.response?.data?.detail || 'שגיאה בשמירה')
+      const detail = e.response?.data?.detail
+      alert(typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail) || 'שגיאה בשמירה'))
     } finally { setSavingDetails(false) }
   }
 
@@ -271,6 +282,16 @@ export default function OrderDetail() {
         )}
       </div>
 
+      {order.status === 'pending' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <strong>📨 ההזמנה כבר נשלחה למחסן.</strong> כל שינוי שתעשה כאן יישמר ויופיע מיד אצל המנהל.
+        </div>
+      )}
+      {order.status === 'active' && (
+        <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
+          <strong>✓ ההזמנה אושרה.</strong> אפשר עוד לערוך / להוסיף פריטים — שינויים מסתנכרנים אוטומטית.
+        </div>
+      )}
       {!editable && (
         <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-600">
           הזמנה זו נסגרה / בוטלה — לא ניתן לערוך.
