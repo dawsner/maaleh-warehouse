@@ -93,6 +93,33 @@ def update_user(
     return db_user
 
 
+@router.put("/bulk", response_model=dict)
+def bulk_update_users(
+    payload: schemas.UserBulkUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin)
+):
+    """עדכון גורף — בוחר user_ids, מעדכן את כל השדות שהוגדרו (year/status/role/active).
+    שימוש טיפוסי: לסמן 15 סטודנטים ולהעביר משנה א׳ ל-ב׳ בלחיצה אחת."""
+    if not payload.user_ids:
+        raise HTTPException(status_code=400, detail="לא נבחרו משתמשים")
+
+    users = db.query(models.User).filter(models.User.id.in_(payload.user_ids)).all()
+    if not users:
+        raise HTTPException(status_code=404, detail="לא נמצאו משתמשים")
+
+    update_fields = payload.model_dump(exclude={"user_ids"}, exclude_unset=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="לא צוין שדה לעדכון")
+
+    for u in users:
+        for key, value in update_fields.items():
+            setattr(u, key, value)
+
+    db.commit()
+    return {"updated": len(users), "fields": list(update_fields.keys())}
+
+
 @router.get("/{user_id}/loans")
 def get_user_loans(
     user_id: int,

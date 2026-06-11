@@ -20,10 +20,11 @@ class Token(BaseModel):
 class UserBase(BaseModel):
     name: str
     email: str
-    role: str = "student"
+    role: str = "student"  # 'admin' / 'student' / 'lecturer'
     year: Optional[int] = None
     student_id: Optional[str] = None
     phone: Optional[str] = None
+    status: str = "active"  # 'active' / 'graduate' / 'blocked'
 
 
 class UserCreate(UserBase):
@@ -38,6 +39,7 @@ class UserUpdate(BaseModel):
     student_id: Optional[str] = None
     phone: Optional[str] = None
     active: Optional[bool] = None
+    status: Optional[str] = None
     password: Optional[str] = None
 
 
@@ -48,6 +50,16 @@ class UserOut(UserBase):
 
     class Config:
         from_attributes = True
+
+
+class UserBulkUpdate(BaseModel):
+    """עדכון גורף — מעדכן רשימה של משתמשים לפי IDs.
+    כל שדה אופציונלי; רק שדות שמוגדרים יישלחו."""
+    user_ids: List[int]
+    year: Optional[int] = None
+    status: Optional[str] = None
+    role: Optional[str] = None
+    active: Optional[bool] = None
 
 
 # Equipment schemas
@@ -67,6 +79,7 @@ class EquipmentBase(BaseModel):
     notes: Optional[str] = None
     min_year: int = 1
     max_year: int = 4
+    is_key_product: bool = False
 
 
 class EquipmentCreate(EquipmentBase):
@@ -89,6 +102,7 @@ class EquipmentUpdate(BaseModel):
     notes: Optional[str] = None
     min_year: Optional[int] = None
     max_year: Optional[int] = None
+    is_key_product: Optional[bool] = None
     active: Optional[bool] = None
 
 
@@ -234,8 +248,10 @@ class OrderItemCreate(BaseModel):
 
 class OrderItemUpdate(BaseModel):
     quantity: Optional[int] = None
+    quantity_issued: Optional[int] = None     # מנהל בלבד
+    quantity_returned: Optional[int] = None   # מנהל בלבד
     returned_at: Optional[datetime] = None
-    mark_returned: Optional[bool] = None  # קיצור — שולח True כדי לסמן עכשיו
+    mark_returned: Optional[bool] = None  # קיצור — סימון 'הוחזר במלואו'
 
 
 class OrderItemOut(BaseModel):
@@ -244,6 +260,8 @@ class OrderItemOut(BaseModel):
     kit_id: Optional[int] = None
     equipment_id: Optional[int] = None
     quantity: int = 1
+    quantity_issued: int = 0
+    quantity_returned: int = 0
     returned_at: Optional[datetime] = None
     added_at: datetime
     added_by: Optional[int] = None

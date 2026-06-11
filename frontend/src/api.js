@@ -141,13 +141,38 @@ export const ordersAPI = {
   updateItem: (id, itemId, data) => api.put(`/orders/${id}/items/${itemId}`, data),
   removeItem: (id, itemId) => api.delete(`/orders/${id}/items/${itemId}`),
   markItemReturned: (id, itemId) => api.put(`/orders/${id}/items/${itemId}`, { mark_returned: true }),
+  // מעברי סטטוס — מחזור החיים החדש:
+  // draft → submit → pending → mark_ready → ready → check_out → checked_out → mark_returned → returned → close
+  submit: (id) => api.put(`/orders/${id}/submit`),
+  markReady: (id) => api.put(`/orders/${id}/mark_ready`),
+  checkOut: (id) => api.put(`/orders/${id}/check_out`),
+  markReturned: (id) => api.put(`/orders/${id}/mark_returned`),
   approve: (id, data, force = false) => api.put(`/orders/${id}/approve${force ? '?force=true' : ''}`, data),
   reject: (id, data) => api.put(`/orders/${id}/reject`, data),
   close: (id) => api.put(`/orders/${id}/close`),
   cancel: (id) => api.put(`/orders/${id}/cancel`),
-  // בדיקת זמינות לטווח תאריכים — מחזיר {equipment: {id: {available, total}}, kits: {id: {available}}}
   checkAvailability: (start, end) => api.get('/orders/availability/check', { params: { start, end } }),
 }
+
+// סטטוסים — מילון לתצוגה
+export const ORDER_STATUS_META = {
+  draft:       { label: 'טיוטה — לא נשלח',     color: 'bg-slate-100 text-slate-600' },
+  pending:     { label: 'בטיפול',               color: 'bg-amber-100 text-amber-800' },
+  ready:       { label: 'מוכן לאיסוף',          color: 'bg-blue-100 text-blue-800' },
+  checked_out: { label: 'יצא',                  color: 'bg-green-100 text-green-800' },
+  returned:    { label: 'חזר',                  color: 'bg-purple-100 text-purple-800' },
+  closed:      { label: 'סגור',                 color: 'bg-slate-200 text-slate-700' },
+  cancelled:   { label: 'בוטל',                 color: 'bg-slate-100 text-slate-500' },
+  rejected:    { label: 'נדחה',                 color: 'bg-red-100 text-red-700' },
+}
+
+// רשימת תפקידי צוות קבועים (יוצגו כ-dropdown ב-CrewEditor)
+export const CREW_ROLES = [
+  'במאי', 'תסריטאי', 'מפיק', 'עוזר במאי',
+  'צלם', 'עוזר צלם', 'גריפ', 'גאפר',
+  'תאורן', 'מעצב סאונד', 'מקליט', 'בומר',
+  'עורך', 'עיצוב אומנותי', 'עוזר הפקה', 'תפקיד נוסף',
+]
 
 // Users
 export const usersAPI = {
@@ -155,7 +180,21 @@ export const usersAPI = {
   getStats: () => api.get('/users/stats'),
   create: (data) => api.post('/users', data),
   update: (id, data) => api.put(`/users/${id}`, data),
+  bulkUpdate: (data) => api.put('/users/bulk', data),  // {user_ids, year?, status?, role?, active?}
   getUserLoans: (id) => api.get(`/users/${id}/loans`),
+}
+
+// סטטוס משתמש לתצוגה
+export const USER_STATUS_META = {
+  active:   { label: 'פעיל',  color: 'bg-green-100 text-green-700' },
+  graduate: { label: 'בוגר',  color: 'bg-blue-100 text-blue-700' },
+  blocked:  { label: 'חסום',  color: 'bg-rose-100 text-rose-700' },
+}
+
+export const USER_ROLE_META = {
+  admin:    { label: 'מנהל',     color: 'bg-purple-100 text-purple-700' },
+  student:  { label: 'סטודנט',   color: 'bg-slate-100 text-slate-700' },
+  lecturer: { label: 'מרצה',     color: 'bg-amber-100 text-amber-700' },
 }
 
 export default api

@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ordersAPI, kitsAPI, equipmentAPI } from '../../api'
+import { ordersAPI, kitsAPI, equipmentAPI, ORDER_STATUS_META, CREW_ROLES } from '../../api'
 import { format } from 'date-fns'
 
+const fmtDateTime = (d) => d ? format(new Date(d), 'dd/MM/yyyy HH:mm') : '—'
 const fmtDate = (d) => d ? format(new Date(d), 'dd/MM/yyyy') : '—'
 
-const STATUS_META = {
-  pending:   { label: 'ממתינה לאישור', color: 'bg-amber-100 text-amber-800' },
-  active:    { label: 'פעילה',          color: 'bg-green-100 text-green-800' },
-  closed:    { label: 'סגורה',          color: 'bg-slate-200 text-slate-700' },
-  cancelled: { label: 'בוטלה',          color: 'bg-slate-100 text-slate-500' },
-  rejected:  { label: 'נדחתה',          color: 'bg-red-100 text-red-700' },
+// המרת ISO לערך של datetime-local input (YYYY-MM-DDTHH:mm)
+const toLocalInput = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const EDITABLE = new Set(['pending', 'active'])
+const EDITABLE = new Set(['draft', 'pending', 'ready', 'checked_out', 'returned'])
 const TABS = [
   { key: 'kits',      label: '🎒 ערכות' },
   { key: 'equipment', label: '📦 ציוד' },
@@ -53,48 +54,47 @@ function QtyInput({ value, max, onChange, disabled }) {
   )
 }
 
-/** עורך אנשי צוות — רשימה גמישה של {name, role} */
+/**
+ * עורך אנשי צוות — רשימה קבועה של תפקידים מהקובץ הראשי.
+ * תפקיד = שם תפקיד בעמודה אחת (קבוע), שם בעל התפקיד בעמודה הבאה (חופשי).
+ * תפקיד שלא רוצים — משאירים ריק.
+ */
 function CrewEditor({ crew, onChange, disabled }) {
-  const list = crew || []
-  const setItem = (i, key, v) => {
-    const copy = [...list]
-    copy[i] = { ...copy[i], [key]: v }
-    onChange(copy)
+  // ממירים crew מהשרת לפי תפקיד; אם רוצים תפקיד שלא ברשימה — מוסיפים שורה גמישה
+  const byRole = useMemo(() => {
+    const m = {}
+    ;(crew || []).forEach(c => {
+      if (c?.role) m[c.role] = c.name || ''
+      else if (c?.name) m[`__free_${Object.keys(m).length}`] = c.name
+    })
+    return m
+  }, [crew])
+
+  const setName = (role, name) => {
+    const newList = []
+    // עוברים על כל תפקיד קבוע, שומרים מי שיש לו שם
+    CREW_ROLES.forEach(r => {
+      const v = r === role ? name : (byRole[r] || '')
+      if (v.trim()) newList.push({ role: r, name: v.trim() })
+    })
+    onChange(newList)
   }
-  const remove = (i) => onChange(list.filter((_, idx) => idx !== i))
-  const add = () => onChange([...list, { name: '', role: '' }])
 
   return (
-    <div className="space-y-2">
-      {list.length === 0 && <p className="text-xs text-slate-400">אין אנשי צוות עדיין</p>}
-      {list.map((m, i) => (
-        <div key={i} className="flex gap-2 items-center">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {CREW_ROLES.map(role => (
+        <div key={role} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+          <span className="text-xs font-semibold text-slate-600 w-24 flex-shrink-0">{role}</span>
           <input
             type="text"
-            value={m.name || ''}
-            onChange={e => setItem(i, 'name', e.target.value)}
-            placeholder="שם"
+            value={byRole[role] || ''}
+            onChange={e => setName(role, e.target.value)}
+            placeholder="שם המבצע"
             disabled={disabled}
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
+            className="flex-1 border border-slate-200 rounded-md px-2 py-1 text-sm bg-white"
           />
-          <input
-            type="text"
-            value={m.role || ''}
-            onChange={e => setItem(i, 'role', e.target.value)}
-            placeholder="תפקיד (למשל: צלם)"
-            disabled={disabled}
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-          />
-          {!disabled && (
-            <button onClick={() => remove(i)} className="text-red-400 hover:text-red-600 px-2">✕</button>
-          )}
         </div>
       ))}
-      {!disabled && (
-        <button onClick={add} className="text-sm text-primary-600 hover:text-primary-700 font-bold">
-          + הוסף איש צוות
-        </button>
-      )}
     </div>
   )
 }
@@ -135,8 +135,8 @@ export default function OrderDetail() {
         setDraft({
           production_name: res.data.production_name || '',
           notes: res.data.notes || '',
-          loan_date: res.data.loan_date ? res.data.loan_date.slice(0, 10) : '',
-          due_date: res.data.due_date ? res.data.due_date.slice(0, 10) : '',
+          loan_date: toLocalInput(res.data.loan_date),
+          due_date: toLocalInput(res.data.due_date),
           crew: res.data.crew || [],
         })
       }
@@ -256,7 +256,7 @@ export default function OrderDetail() {
     </div>
   )
 
-  const statusMeta = STATUS_META[order.status] || { label: order.status, color: 'bg-slate-100' }
+  const statusMeta = ORDER_STATUS_META[order.status] || { label: order.status, color: 'bg-slate-100' }
 
   return (
     <div className="space-y-6" dir="rtl">
@@ -282,14 +282,53 @@ export default function OrderDetail() {
         )}
       </div>
 
-      {order.status === 'pending' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-          <strong>📨 ההזמנה כבר נשלחה למחסן.</strong> כל שינוי שתעשה כאן יישמר ויופיע מיד אצל המנהל.
+      {order.status === 'draft' && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <strong>📝 טיוטה — לא נשלח עדיין למחסן.</strong> מלא את הפרטים, הוסף פריטים, ולחץ "שלח למחסן".
+          </div>
+          <button
+            onClick={async () => {
+              if (!order.items?.length) { alert('הוסף לפחות פריט אחד לפני שליחה'); return }
+              try { await ordersAPI.submit(id); load(true, true) }
+              catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+            }}
+            className="bg-primary-600 hover:bg-primary-700 text-white font-bold px-4 py-2 rounded-xl text-sm shadow-sm"
+          >
+            📨 שלח למחסן
+          </button>
         </div>
       )}
-      {order.status === 'active' && (
+      {order.status === 'pending' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <strong>⏳ ההזמנה בטיפול במחסן.</strong> המנהל מטפל — עוד אפשר לערוך פרטים והפריטים.
+        </div>
+      )}
+      {order.status === 'ready' && (
+        <div className="bg-blue-50 border-2 border-blue-300 rounded-xl px-4 py-3 text-sm text-blue-900 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <strong>🎒 הציוד מוכן לאיסוף!</strong> כשתגיע למחסן לקחת — לחץ "אני לוקח" כדי לחתום.
+          </div>
+          <button
+            onClick={async () => {
+              if (!confirm('אישור: אני מאשר שלקחתי את הציוד מהמחסן')) return
+              try { await ordersAPI.checkOut(id); load(true, true) }
+              catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+            }}
+            className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl text-sm shadow-sm"
+          >
+            ✍️ אני לוקח
+          </button>
+        </div>
+      )}
+      {order.status === 'checked_out' && (
         <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
-          <strong>✓ ההזמנה אושרה.</strong> אפשר עוד לערוך / להוסיף פריטים — שינויים מסתנכרנים אוטומטית.
+          <strong>✓ הציוד אצלך.</strong> כשתחזיר למחסן — הם יסמנו כאן.
+        </div>
+      )}
+      {order.status === 'returned' && (
+        <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 text-sm text-purple-800">
+          <strong>🔄 ההזמנה חזרה למחסן.</strong> ממתינים לסגירה סופית.
         </div>
       )}
       {!editable && (
@@ -315,24 +354,23 @@ export default function OrderDetail() {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך מ-</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך + שעה מ-</label>
               <input
-                type="date"
+                type="datetime-local"
                 value={draft.loan_date}
                 onChange={e => setDraft(d => ({ ...d, loan_date: e.target.value }))}
                 disabled={!editable}
-                min={new Date().toISOString().split('T')[0]}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך עד-</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">תאריך + שעה עד-</label>
               <input
-                type="date"
+                type="datetime-local"
                 value={draft.due_date}
                 onChange={e => setDraft(d => ({ ...d, due_date: e.target.value }))}
                 disabled={!editable}
-                min={draft.loan_date || new Date().toISOString().split('T')[0]}
+                min={draft.loan_date}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
               />
             </div>
@@ -438,13 +476,22 @@ export default function OrderDetail() {
               {tab === 'equipment' && filteredEq.map(e => {
                 const existing = itemsByEquipment[e.id]
                 const av = availability.equipment[e.id]?.available ?? e.quantity
+                const isKey = !!e.is_key_product
+                // למוצרי מפתח — אסור מעל הזמין. לשאר — אין הגבלה (גם אם זמין 0)
+                const maxQty = isKey ? av : undefined
                 return (
                   <tr key={e.id} className={`hover:bg-slate-50 ${existing ? 'bg-primary-50/30' : ''}`}>
-                    <td className="px-4 py-2.5 font-bold text-slate-800">📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}</td>
+                    <td className="px-4 py-2.5 font-bold text-slate-800">
+                      {isKey && <span title="מוצר מפתח" className="mr-1">🔑</span>}
+                      📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}
+                    </td>
                     <td className="px-4 py-2.5 text-slate-500">{e.category}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{av} / {e.quantity}</td>
+                    <td className={`px-4 py-2.5 ${isKey && av === 0 ? 'text-rose-600 font-bold' : 'text-slate-600'}`}>
+                      {av} / {e.quantity}
+                      {isKey && av === 0 && <span className="text-[10px] text-rose-500 block">לא זמין בתאריכים</span>}
+                    </td>
                     <td className="px-4 py-2.5">
-                      <QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('equipment', e.id, v)} disabled={!editable} />
+                      <QtyInput value={existing?.quantity || 0} max={maxQty} onChange={v => setItemQty('equipment', e.id, v)} disabled={!editable || (isKey && av === 0 && !existing)} />
                     </td>
                   </tr>
                 )

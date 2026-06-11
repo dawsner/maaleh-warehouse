@@ -20,6 +20,7 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
     price: 0, location: '', manufacturer: '', model_name: '',
     tag_id: '', image_url: '', notes: '',
     min_year: 1, max_year: 4,
+    is_key_product: false,
     ...initial
   })
   const [imgError, setImgError] = useState(false)
@@ -144,11 +145,19 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
             {YEAR_OPTIONS.filter(y => y >= form.min_year).map(y => <option key={y} value={y}>שנה {y}</option>)}
           </select>
         </div>
-        <div className="col-span-2">
-          <label className="flex items-center gap-3 cursor-pointer">
+        <div className="col-span-2 grid grid-cols-2 gap-3">
+          <label className="flex items-center gap-3 cursor-pointer bg-slate-50 rounded-xl p-3">
             <input type="checkbox" checked={form.insured} onChange={e => set('insured', e.target.checked)}
               className="w-4 h-4 text-primary-600 rounded" />
-            <span className="text-sm font-medium text-slate-700">מבוטח</span>
+            <span className="text-sm font-medium text-slate-700">🛡️ מבוטח</span>
+          </label>
+          <label className="flex items-center gap-3 cursor-pointer bg-amber-50 rounded-xl p-3 border border-amber-200">
+            <input type="checkbox" checked={form.is_key_product} onChange={e => set('is_key_product', e.target.checked)}
+              className="w-4 h-4 rounded" />
+            <div>
+              <p className="text-sm font-bold text-amber-800">🔑 מוצר מפתח</p>
+              <p className="text-[11px] text-amber-600">הגבלת מלאי קשיחה — לא ניתן להזמין מעל הכמות הזמינה (מצלמה, זום)</p>
+            </div>
           </label>
         </div>
       </div>

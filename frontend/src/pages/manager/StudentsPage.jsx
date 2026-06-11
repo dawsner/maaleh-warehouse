@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react'
-import { usersAPI, exportsAPI, downloadBlob } from '../../api'
+import React, { useState, useEffect, useMemo } from 'react'
+import { usersAPI, exportsAPI, downloadBlob, USER_STATUS_META, USER_ROLE_META } from '../../api'
 import Modal from '../../components/Modal'
 
-const YEAR_NAMES = { 1: "א'", 2: "ב'", 3: "ג'", 4: "ד'" }
+const YEAR_NAMES = { 1: "א'", 2: "ב'", 3: "ג'", 4: "ד'", 5: "ה'" }
 
 function StudentForm({ initial, onSubmit, onClose, loading }) {
   const [form, setForm] = useState({
     name: '', email: '', password: '', role: 'student',
-    year: 1, student_id: '', phone: '', ...initial
+    year: 1, student_id: '', phone: '', status: 'active', ...initial
   })
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -34,13 +34,13 @@ function StudentForm({ initial, onSubmit, onClose, loading }) {
             required={!initial?.id}
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500" />
         </div>
-        {form.role !== 'admin' && (
+        {form.role === 'student' && (
           <>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">שנת לימוד</label>
               <select value={form.year || 1} onChange={e => set('year', parseInt(e.target.value))}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
-                {[1,2,3,4].map(y => <option key={y} value={y}>שנה {YEAR_NAMES[y]}</option>)}
+                {[1,2,3,4,5].map(y => <option key={y} value={y}>שנה {YEAR_NAMES[y]}</option>)}
               </select>
             </div>
             <div>
@@ -60,7 +60,17 @@ function StudentForm({ initial, onSubmit, onClose, loading }) {
           <select value={form.role} onChange={e => set('role', e.target.value)}
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
             <option value="student">סטודנט</option>
+            <option value="lecturer">מרצה</option>
             <option value="admin">מנהל</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">סטטוס</label>
+          <select value={form.status || 'active'} onChange={e => set('status', e.target.value)}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
+            <option value="active">פעיל</option>
+            <option value="graduate">בוגר</option>
+            <option value="blocked">חסום</option>
           </select>
         </div>
       </div>
@@ -75,6 +85,73 @@ function StudentForm({ initial, onSubmit, onClose, loading }) {
         </button>
       </div>
     </form>
+  )
+}
+
+function BulkActionModal({ open, onClose, count, onSubmit }) {
+  const [action, setAction] = useState('year')
+  const [year, setYear] = useState(2)
+  const [status, setStatus] = useState('active')
+
+  if (!open) return null
+
+  const handle = () => {
+    if (action === 'year') onSubmit({ year: parseInt(year) })
+    else if (action === 'status') onSubmit({ status })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()} dir="rtl">
+        <h2 className="text-lg font-extrabold text-slate-800">פעולה גורפת על {count} משתמשים</h2>
+
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">מה לשנות?</label>
+          <select value={action} onChange={e => setAction(e.target.value)}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
+            <option value="year">שנת לימוד</option>
+            <option value="status">סטטוס</option>
+          </select>
+        </div>
+
+        {action === 'year' && (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">העבר ל-</label>
+            <select value={year} onChange={e => setYear(e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
+              {[1,2,3,4,5].map(y => <option key={y} value={y}>שנה {y}</option>)}
+            </select>
+          </div>
+        )}
+
+        {action === 'status' && (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">סמן כ-</label>
+            <select value={status} onChange={e => setStatus(e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
+              <option value="active">פעיל</option>
+              <option value="graduate">בוגר</option>
+              <option value="blocked">חסום</option>
+            </select>
+          </div>
+        )}
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+          ⚠ הפעולה תשפיע על {count} משתמשים — לא ניתן לבטל
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={handle}
+            className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-bold py-2.5 rounded-xl">
+            בצע
+          </button>
+          <button onClick={onClose}
+            className="flex-1 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl">
+            ביטול
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -96,23 +173,55 @@ function ActiveLoansCell({ userId }) {
 
 export default function StudentsPage() {
   const [students, setStudents] = useState([])
-  const [roleFilter, setRoleFilter] = useState('student')  // student | admin
+  const [roleFilter, setRoleFilter] = useState('student')  // student | admin | lecturer
+  const [statusFilter, setStatusFilter] = useState('')      // '' | active | graduate | blocked
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editStudent, setEditStudent] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  // bulk selection
+  const [selected, setSelected] = useState(new Set())
+  const [bulkOpen, setBulkOpen] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
       const res = await usersAPI.getAll({ role: roleFilter })
       setStudents(res.data)
+      setSelected(new Set())
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [roleFilter])
+
+  const filtered = useMemo(() => {
+    let list = students
+    if (statusFilter) list = list.filter(s => (s.status || 'active') === statusFilter)
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.email || '').toLowerCase().includes(q) ||
+        (s.student_id || '').toLowerCase().includes(q)
+      )
+    }
+    return list
+  }, [students, statusFilter, search])
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set())
+    else setSelected(new Set(filtered.map(s => s.id)))
+  }
 
   const handleSubmit = async (form) => {
     setSubmitting(true)
@@ -170,31 +279,65 @@ export default function StudentsPage() {
       </div>
 
       {/* Role toggle */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1 flex gap-1 max-w-md">
-        <button
-          onClick={() => setRoleFilter('student')}
-          className={`flex-1 py-2 px-4 rounded-xl text-sm font-semibold transition-all
-            ${roleFilter === 'student' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
-        >
-          👨‍🎓 סטודנטים
-        </button>
-        <button
-          onClick={() => setRoleFilter('admin')}
-          className={`flex-1 py-2 px-4 rounded-xl text-sm font-semibold transition-all
-            ${roleFilter === 'admin' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
-        >
-          🔑 מנהלים
-        </button>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1 flex gap-1 max-w-xl">
+        {[
+          { key: 'student',  label: '👨‍🎓 סטודנטים' },
+          { key: 'lecturer', label: '🎓 מרצים' },
+          { key: 'admin',    label: '🔑 מנהלים' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setRoleFilter(t.key)}
+            className={`flex-1 py-2 px-4 rounded-xl text-sm font-semibold transition-all
+              ${roleFilter === t.key ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="חיפוש שם / אימייל / ת״ז..."
+          className="flex-1 min-w-[200px] border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
+        />
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white">
+          <option value="">כל הסטטוסים</option>
+          <option value="active">פעיל</option>
+          <option value="graduate">בוגר</option>
+          <option value="blocked">חסום</option>
+        </select>
+      </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="bg-primary-50 border-2 border-primary-300 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 sticky top-2 z-10 shadow-md">
+          <div className="text-sm font-bold text-primary-800">
+            {selected.size} נבחרו
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setBulkOpen(true)}
+              className="bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold px-4 py-2 rounded-xl">
+              ⚡ פעולה גורפת
+            </button>
+            <button onClick={() => setSelected(new Set())}
+              className="bg-white border border-slate-200 text-slate-700 text-sm font-bold px-4 py-2 rounded-xl">
+              נקה בחירה
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Mobile cards */}
-      {students.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="md:hidden bg-white rounded-2xl shadow-sm border border-slate-100 text-center py-12 text-slate-400">
-          אין סטודנטים רשומים
+          אין משתמשים תואמים
         </div>
       ) : (
         <div className="grid gap-3 md:hidden">
-          {students.map(student => (
+          {filtered.map(student => (
             <div key={student.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
@@ -223,54 +366,87 @@ export default function StudentsPage() {
       )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hidden md:block">
-        {students.length === 0 ? (
-          <div className="text-center py-12 text-slate-400">אין סטודנטים רשומים</div>
+        {filtered.length === 0 ? (
+          <div className="text-center py-12 text-slate-400">אין משתמשים תואמים</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  {['שם', 'אימייל', 'שנה', 'ת"ז סטודנט', 'טלפון', 'השאלות פעילות', 'פעולות'].map(h => (
+                  <th className="px-3 py-3 w-10">
+                    <input type="checkbox"
+                      checked={selected.size === filtered.length && filtered.length > 0}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4" />
+                  </th>
+                  {['שם', 'אימייל', 'שנה', 'סטטוס', 'ת"ז', 'השאלות פעילות', 'פעולות'].map(h => (
                     <th key={h} className="text-right text-xs font-semibold text-slate-500 px-4 py-3">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {students.map(student => (
-                  <tr key={student.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                          {student.name.charAt(0)}
+                {filtered.map(student => {
+                  const sm = USER_STATUS_META[student.status || 'active'] || USER_STATUS_META.active
+                  const checked = selected.has(student.id)
+                  return (
+                    <tr key={student.id} className={`hover:bg-slate-50 transition-colors ${checked ? 'bg-primary-50/30' : ''}`}>
+                      <td className="px-3 py-3">
+                        <input type="checkbox" checked={checked}
+                          onChange={() => toggleSelect(student.id)}
+                          className="w-4 h-4" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                            {student.name.charAt(0)}
+                          </div>
+                          <div>
+                            <p className="font-medium text-slate-800 text-sm">{student.name}</p>
+                            <p className="text-xs text-slate-400">{student.phone || ''}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-slate-800 text-sm">{student.name}</p>
-                          <p className="text-xs text-slate-400">{student.active ? 'פעיל' : 'לא פעיל'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600 dir-ltr text-left">{student.email}</td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-medium">
-                        שנה {YEAR_NAMES[student.year] || student.year}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600 font-mono">{student.student_id || '-'}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{student.phone || '-'}</td>
-                    <td className="px-4 py-3"><ActiveLoansCell userId={student.id} /></td>
-                    <td className="px-4 py-3">
-                      <button onClick={() => { setEditStudent(student); setModalOpen(true) }}
-                        className="text-xs bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1.5 rounded-lg font-medium transition-all">
-                        ערוך
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600 dir-ltr text-left">{student.email}</td>
+                      <td className="px-4 py-3">
+                        {student.year ? (
+                          <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-medium">
+                            שנה {YEAR_NAMES[student.year] || student.year}
+                          </span>
+                        ) : <span className="text-xs text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-bold px-2 py-1 rounded-lg ${sm.color}`}>{sm.label}</span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600 font-mono">{student.student_id || '-'}</td>
+                      <td className="px-4 py-3"><ActiveLoansCell userId={student.id} /></td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => { setEditStudent(student); setModalOpen(true) }}
+                          className="text-xs bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1.5 rounded-lg font-medium transition-all">
+                          ערוך
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Bulk Modal */}
+      <BulkActionModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        count={selected.size}
+        onSubmit={async (fields) => {
+          try {
+            await usersAPI.bulkUpdate({ user_ids: Array.from(selected), ...fields })
+            setBulkOpen(false)
+            load()
+          } catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+        }}
+      />
 
       <Modal
         isOpen={modalOpen}

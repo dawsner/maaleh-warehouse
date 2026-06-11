@@ -1,26 +1,26 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ordersAPI, kitsAPI, equipmentAPI } from '../../api'
+import { ordersAPI, kitsAPI, equipmentAPI, ORDER_STATUS_META, CREW_ROLES } from '../../api'
 import { format } from 'date-fns'
 
 const fmtDate = (d) => d ? format(new Date(d), 'dd/MM/yyyy') : '—'
-
-const STATUS_META = {
-  pending:   { label: 'ממתינה לאישור', color: 'bg-amber-100 text-amber-800' },
-  active:    { label: 'פעילה',          color: 'bg-green-100 text-green-800' },
-  closed:    { label: 'סגורה',          color: 'bg-slate-200 text-slate-700' },
-  cancelled: { label: 'בוטלה',          color: 'bg-slate-100 text-slate-500' },
-  rejected:  { label: 'נדחתה',          color: 'bg-red-100 text-red-700' },
+const fmtDateTime = (d) => d ? format(new Date(d), 'dd/MM/yyyy HH:mm') : '—'
+const toLocalInput = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const EDITABLE = new Set(['pending', 'active'])
+const EDITABLE = new Set(['draft', 'pending', 'ready', 'checked_out', 'returned'])
 const TABS = [
   { key: 'kits',      label: '🎒 ערכות' },
   { key: 'equipment', label: '📦 ציוד' },
   { key: 'order',     label: '📋 בהזמנה' },
 ]
 
-function QtyInput({ value, max, onChange, disabled }) {
+/** Input של כמות עם debounce. accent קובע צבע: 'requested' / 'issued' / 'returned' / 'gap' (כשיש סטיה). */
+function QtyInput({ value, max, onChange, disabled, accent = 'requested' }) {
   const [local, setLocal] = useState(value || 0)
   const timeoutRef = useRef(null)
   useEffect(() => { setLocal(value || 0) }, [value])
@@ -30,6 +30,12 @@ function QtyInput({ value, max, onChange, disabled }) {
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => onChange(n), 400)
   }
+  const colors = {
+    requested: local > 0 ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-400',
+    issued:    local > 0 ? 'bg-green-50 border-green-300 text-green-700'      : 'bg-white border-slate-200 text-slate-400',
+    returned:  local > 0 ? 'bg-purple-50 border-purple-300 text-purple-700'   : 'bg-white border-slate-200 text-slate-400',
+    gap:       'bg-rose-50 border-rose-400 text-rose-700 ring-2 ring-rose-200',
+  }
   return (
     <input
       type="number"
@@ -38,32 +44,42 @@ function QtyInput({ value, max, onChange, disabled }) {
       onChange={e => handleChange(e.target.value)}
       onBlur={() => { if (timeoutRef.current) { clearTimeout(timeoutRef.current); onChange(local) } }}
       disabled={disabled}
-      className={`w-16 text-center font-bold rounded-lg border py-1.5 text-sm
-        ${local > 0 ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-400'}
-        ${disabled ? 'opacity-50' : ''}`}
+      className={`w-16 text-center font-bold rounded-lg border py-1.5 text-sm ${colors[accent]} ${disabled ? 'opacity-50' : ''}`}
     />
   )
 }
 
 function CrewEditor({ crew, onChange, disabled }) {
-  const list = crew || []
-  const setItem = (i, key, v) => { const copy = [...list]; copy[i] = { ...copy[i], [key]: v }; onChange(copy) }
-  const remove = (i) => onChange(list.filter((_, idx) => idx !== i))
-  const add = () => onChange([...list, { name: '', role: '' }])
+  const byRole = useMemo(() => {
+    const m = {}
+    ;(crew || []).forEach(c => { if (c?.role) m[c.role] = c.name || '' })
+    return m
+  }, [crew])
+
+  const setName = (role, name) => {
+    const newList = []
+    CREW_ROLES.forEach(r => {
+      const v = r === role ? name : (byRole[r] || '')
+      if (v.trim()) newList.push({ role: r, name: v.trim() })
+    })
+    onChange(newList)
+  }
 
   return (
-    <div className="space-y-2">
-      {list.length === 0 && <p className="text-xs text-slate-400">אין אנשי צוות</p>}
-      {list.map((m, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <input type="text" value={m.name || ''} onChange={e => setItem(i, 'name', e.target.value)} placeholder="שם" disabled={disabled}
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
-          <input type="text" value={m.role || ''} onChange={e => setItem(i, 'role', e.target.value)} placeholder="תפקיד" disabled={disabled}
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
-          {!disabled && <button onClick={() => remove(i)} className="text-red-400 hover:text-red-600 px-2">✕</button>}
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {CREW_ROLES.map(role => (
+        <div key={role} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+          <span className="text-xs font-semibold text-slate-600 w-24 flex-shrink-0">{role}</span>
+          <input
+            type="text"
+            value={byRole[role] || ''}
+            onChange={e => setName(role, e.target.value)}
+            placeholder="שם המבצע"
+            disabled={disabled}
+            className="flex-1 border border-slate-200 rounded-md px-2 py-1 text-sm bg-white"
+          />
         </div>
       ))}
-      {!disabled && <button onClick={add} className="text-sm text-primary-600 font-bold">+ הוסף איש צוות</button>}
     </div>
   )
 }
@@ -206,8 +222,8 @@ export default function OrderDetailPage() {
           production_name: res.data.production_name || '',
           notes: res.data.notes || '',
           manager_notes: res.data.manager_notes || '',
-          loan_date: res.data.loan_date ? res.data.loan_date.slice(0, 10) : '',
-          due_date: res.data.due_date ? res.data.due_date.slice(0, 10) : '',
+          loan_date: toLocalInput(res.data.loan_date),
+          due_date: toLocalInput(res.data.due_date),
           crew: res.data.crew || [],
         })
       }
@@ -303,6 +319,17 @@ export default function OrderDetailPage() {
     } catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
   }
 
+  /** עדכון quantity_issued של פריט בהזמנה — מנהל מסמן מה יצא בפועל. */
+  const setItemIssued = async (itemId, q) => {
+    try { await ordersAPI.updateItem(id, itemId, { quantity_issued: q }); load(true, false) }
+    catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+  }
+  /** עדכון quantity_returned של פריט בהזמנה. */
+  const setItemReturned = async (itemId, q) => {
+    try { await ordersAPI.updateItem(id, itemId, { quantity_returned: q }); load(true, false) }
+    catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+  }
+
   const handleApprove = async (payload, force = false) => {
     await ordersAPI.approve(id, payload, force)
     load(true)
@@ -329,7 +356,7 @@ export default function OrderDetailPage() {
     </div>
   )
 
-  const statusMeta = STATUS_META[order.status] || { label: order.status, color: 'bg-slate-100' }
+  const statusMeta = ORDER_STATUS_META[order.status] || { label: order.status, color: 'bg-slate-100' }
   const openItems = order.items.filter(i => !i.returned_at).length
 
   return (
@@ -349,11 +376,32 @@ export default function OrderDetailPage() {
         <div className="flex gap-2 flex-wrap">
           {order.status === 'pending' && (
             <>
-              <button onClick={() => setShowApprove(true)} className="bg-green-600 hover:bg-green-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm">✓ אשר</button>
+              <button onClick={async () => {
+                try { await ordersAPI.markReady(id); load(true, true) }
+                catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+              }}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm">
+                🎒 סמן כמוכן לאיסוף
+              </button>
               <button onClick={() => setShowReject(true)} className="bg-red-50 hover:bg-red-100 text-red-700 text-sm font-bold px-4 py-2 rounded-xl">✕ דחה</button>
             </>
           )}
-          {order.status === 'active' && (
+          {order.status === 'ready' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-xs text-blue-800">
+              ממתין לחתימת סטודנט (יצא)
+            </div>
+          )}
+          {order.status === 'checked_out' && (
+            <button onClick={async () => {
+              if (!confirm('לסמן שכל הציוד חזר למחסן?')) return
+              try { await ordersAPI.markReturned(id); load(true, true) }
+              catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+            }}
+              className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm">
+              🔄 סמן חזר
+            </button>
+          )}
+          {(order.status === 'returned' || order.status === 'checked_out') && (
             <button onClick={handleClose} className="bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold px-4 py-2 rounded-xl">🔒 סגור הזמנה</button>
           )}
         </div>
@@ -372,12 +420,12 @@ export default function OrderDetailPage() {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">מ-</label>
-              <input type="date" value={draft.loan_date} onChange={e => setDraft(d => ({ ...d, loan_date: e.target.value }))} disabled={!editable}
+              <input type="datetime-local" value={draft.loan_date} onChange={e => setDraft(d => ({ ...d, loan_date: e.target.value }))} disabled={!editable}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">עד-</label>
-              <input type="date" value={draft.due_date} onChange={e => setDraft(d => ({ ...d, due_date: e.target.value }))} disabled={!editable} min={draft.loan_date}
+              <input type="datetime-local" value={draft.due_date} onChange={e => setDraft(d => ({ ...d, due_date: e.target.value }))} disabled={!editable} min={draft.loan_date}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
             </div>
           </div>
@@ -434,74 +482,101 @@ export default function OrderDetailPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-xs text-slate-500">
-              <tr>
-                <th className="text-right px-4 py-2 font-semibold">פריט</th>
-                <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
-                <th className="text-right px-4 py-2 font-semibold">זמין</th>
-                <th className="text-right px-4 py-2 font-semibold">כמות</th>
-                <th className="text-right px-4 py-2 font-semibold">פעולה</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {tab === 'kits' && filteredKits.map(k => {
-                const existing = itemsByKit[k.id]
-                const av = availability.kits[k.id]?.available
-                return (
-                  <tr key={k.id} className={existing ? 'bg-primary-50/30' : ''}>
-                    <td className="px-4 py-2.5 font-bold">🎒 {k.name}</td>
-                    <td className="px-4 py-2.5 text-slate-500">{k.category}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{av ?? '—'}</td>
-                    <td className="px-4 py-2.5"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('kit', k.id, v)} disabled={!editable} /></td>
-                    <td className="px-4 py-2.5">—</td>
-                  </tr>
-                )
-              })}
-              {tab === 'equipment' && filteredEq.map(e => {
-                const existing = itemsByEquipment[e.id]
-                const av = availability.equipment[e.id]?.available ?? e.quantity
-                return (
-                  <tr key={e.id} className={existing ? 'bg-primary-50/30' : ''}>
-                    <td className="px-4 py-2.5 font-bold">📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}</td>
-                    <td className="px-4 py-2.5 text-slate-500">{e.category}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{av} / {e.quantity}</td>
-                    <td className="px-4 py-2.5"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('equipment', e.id, v)} disabled={!editable} /></td>
-                    <td className="px-4 py-2.5">—</td>
-                  </tr>
-                )
-              })}
-              {tab === 'order' && order.items.map(it => {
-                const isKit = !!it.kit
-                const name = it.kit?.name || it.equipment?.name || 'פריט'
-                const cat = it.kit?.category || it.equipment?.category || '—'
-                return (
-                  <tr key={it.id} className={it.returned_at ? 'bg-green-50/30' : ''}>
-                    <td className="px-4 py-2.5 font-bold">
-                      <span className={it.returned_at ? 'text-slate-400 line-through' : 'text-slate-800'}>{isKit ? '🎒' : '📦'} {name}</span>
-                      {it.returned_at && <span className="text-xs text-green-600 mr-2">✓ הוחזר</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-500">{cat}</td>
-                    <td className="px-4 py-2.5 text-slate-600">—</td>
-                    <td className="px-4 py-2.5">
-                      {!it.returned_at ? <QtyInput value={it.quantity} onChange={v => setItemQty(isKit ? 'kit' : 'equipment', isKit ? it.kit_id : it.equipment_id, v)} disabled={!editable} /> :
-                        <span className="text-sm text-slate-400">×{it.quantity}</span>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {order.status === 'active' && !it.returned_at && (
-                        <button onClick={() => handleMarkReturned(it.id)} className="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold px-3 py-1.5 rounded-lg">
-                          ✓ הוחזר
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-              {(tab === 'order' && order.items.length === 0) && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">אין פריטים</td></tr>
-              )}
-            </tbody>
-          </table>
+          {tab === 'order' ? (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs text-slate-500">
+                <tr>
+                  <th className="text-right px-4 py-2 font-semibold">פריט</th>
+                  <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
+                  <th className="text-right px-3 py-2 font-semibold text-primary-700">🔵 הוזמן</th>
+                  <th className="text-right px-3 py-2 font-semibold text-green-700">🟢 יצא</th>
+                  <th className="text-right px-3 py-2 font-semibold text-purple-700">🟣 חזר</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {order.items.map(it => {
+                  const isKit = !!it.kit
+                  const name = it.kit?.name || it.equipment?.name || 'פריט'
+                  const cat = it.kit?.category || it.equipment?.category || '—'
+                  const req = it.quantity || 0
+                  const iss = it.quantity_issued || 0
+                  const ret = it.quantity_returned || 0
+                  const gap = iss > 0 && iss !== req
+                  const partialReturn = iss > 0 && ret > 0 && ret < iss
+                  const fullyReturned = iss > 0 && ret >= iss
+                  return (
+                    <tr key={it.id} className={
+                      fullyReturned ? 'bg-purple-50/40' :
+                      partialReturn ? 'bg-amber-50/40' :
+                      gap ? 'bg-rose-50/30' : ''
+                    }>
+                      <td className="px-4 py-2.5 font-bold">
+                        {isKit ? '🎒' : '📦'} {name}
+                        {fullyReturned && <span className="text-xs text-purple-600 mr-2">✓ הכל חזר</span>}
+                        {gap && !fullyReturned && <span className="text-xs text-rose-600 mr-2">⚠ פער</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-500">{cat}</td>
+                      <td className="px-3 py-2.5">
+                        <QtyInput value={req} accent={gap ? 'gap' : 'requested'}
+                          onChange={v => setItemQty(isKit ? 'kit' : 'equipment', isKit ? it.kit_id : it.equipment_id, v)}
+                          disabled={!editable} />
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <QtyInput value={iss} accent="issued" max={req}
+                          onChange={v => setItemIssued(it.id, v)}
+                          disabled={!editable || !(['pending','ready','checked_out','returned'].includes(order.status))} />
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <QtyInput value={ret} accent="returned" max={iss}
+                          onChange={v => setItemReturned(it.id, v)}
+                          disabled={!editable || !(['checked_out','returned'].includes(order.status))} />
+                      </td>
+                    </tr>
+                  )
+                })}
+                {order.items.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">אין פריטים בהזמנה — עבור ל"ערכות" או "ציוד" כדי להוסיף</td></tr>
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs text-slate-500">
+                <tr>
+                  <th className="text-right px-4 py-2 font-semibold">פריט</th>
+                  <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
+                  <th className="text-right px-4 py-2 font-semibold">זמין</th>
+                  <th className="text-right px-4 py-2 font-semibold">כמות מוזמנת</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {tab === 'kits' && filteredKits.map(k => {
+                  const existing = itemsByKit[k.id]
+                  const av = availability.kits[k.id]?.available
+                  return (
+                    <tr key={k.id} className={existing ? 'bg-primary-50/30' : ''}>
+                      <td className="px-4 py-2.5 font-bold">🎒 {k.name}</td>
+                      <td className="px-4 py-2.5 text-slate-500">{k.category}</td>
+                      <td className="px-4 py-2.5 text-slate-600">{av ?? '—'}</td>
+                      <td className="px-4 py-2.5"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('kit', k.id, v)} disabled={!editable} /></td>
+                    </tr>
+                  )
+                })}
+                {tab === 'equipment' && filteredEq.map(e => {
+                  const existing = itemsByEquipment[e.id]
+                  const av = availability.equipment[e.id]?.available ?? e.quantity
+                  return (
+                    <tr key={e.id} className={existing ? 'bg-primary-50/30' : ''}>
+                      <td className="px-4 py-2.5 font-bold">📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}</td>
+                      <td className="px-4 py-2.5 text-slate-500">{e.category}</td>
+                      <td className="px-4 py-2.5 text-slate-600">{av} / {e.quantity}</td>
+                      <td className="px-4 py-2.5"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('equipment', e.id, v)} disabled={!editable} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 

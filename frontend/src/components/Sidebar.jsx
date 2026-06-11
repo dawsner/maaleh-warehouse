@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useCart } from '../contexts/CartContext'
@@ -6,10 +6,13 @@ import Logo from './Logo'
 
 const managerNav = [
   { to: '/manager', label: 'לוח בקרה', icon: '📊', end: true },
-  { to: '/manager/equipment', label: 'ציוד', icon: '📦' },
-  { to: '/manager/kits', label: 'ערכות', icon: '🎒' },
   { to: '/manager/orders', label: 'הזמנות', icon: '📋' },
-  { to: '/manager/students', label: 'סטודנטים', icon: '👥' },
+  // תפריט "ניהול" — נפתח/נסגר; כולל כל מה שמאחורי הקלעים
+  { group: 'ניהול', icon: '⚙️', children: [
+    { to: '/manager/equipment', label: 'ציוד',       icon: '📦' },
+    { to: '/manager/kits',      label: 'ערכות',      icon: '🎒' },
+    { to: '/manager/students',  label: 'משתמשים',    icon: '👥' },
+  ]},
 ]
 
 const studentNav = [
@@ -22,6 +25,7 @@ export default function Sidebar({ role, isOpen, onClose }) {
   const navigate = useNavigate()
   const cart = useCart()
   const navItems = role === 'admin' ? managerNav : studentNav
+  const [openGroups, setOpenGroups] = useState({ 'ניהול': true })  // פתוח כברירת מחדל
 
   const handleLogout = () => {
     logout()
@@ -55,29 +59,62 @@ export default function Sidebar({ role, isOpen, onClose }) {
 
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={onClose}
-              className={({ isActive }) =>
-                `sidebar-item flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium
-                ${isActive
-                  ? 'bg-primary-50 text-primary-700 font-semibold'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
-                }`
-              }
-            >
-              <span className="text-lg">{item.icon}</span>
-              <span className="flex-1">{item.label}</span>
-              {item.cartBadge && cart.count > 0 && (
-                <span className="bg-primary-600 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
-                  {cart.count}
-                </span>
-              )}
-            </NavLink>
-          ))}
+          {navItems.map((item, idx) => {
+            // אייטם מקובץ (תפריט נפתח)
+            if (item.group) {
+              const isOpen = openGroups[item.group]
+              return (
+                <div key={`g-${item.group}`} className="space-y-1">
+                  <button
+                    onClick={() => setOpenGroups(g => ({ ...g, [item.group]: !g[item.group] }))}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    <span className="text-lg">{item.icon}</span>
+                    <span className="flex-1 text-right">{item.group}</span>
+                    <span className="text-xs text-slate-400">{isOpen ? '▾' : '▸'}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="space-y-1 pr-3">
+                      {item.children.map(child => (
+                        <NavLink key={child.to} to={child.to} end={child.end} onClick={onClose}
+                          className={({ isActive }) =>
+                            `flex items-center gap-3 px-4 py-2 rounded-xl text-sm font-medium
+                            ${isActive ? 'bg-primary-50 text-primary-700 font-semibold' : 'text-slate-500 hover:bg-slate-50'}`
+                          }>
+                          <span>{child.icon}</span>
+                          <span>{child.label}</span>
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            }
+            // אייטם רגיל
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `sidebar-item flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium
+                  ${isActive
+                    ? 'bg-primary-50 text-primary-700 font-semibold'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
+                  }`
+                }
+              >
+                <span className="text-lg">{item.icon}</span>
+                <span className="flex-1">{item.label}</span>
+                {item.cartBadge && cart.count > 0 && (
+                  <span className="bg-primary-600 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                    {cart.count}
+                  </span>
+                )}
+              </NavLink>
+            )
+          })}
         </nav>
 
         {/* User info at bottom */}

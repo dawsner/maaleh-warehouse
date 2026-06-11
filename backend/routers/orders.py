@@ -16,9 +16,20 @@ import schemas
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
-# --- סטטוסים ---
-EDITABLE_STATUSES = {"pending", "approved", "active"}  # אפשר לערוך
+# --- סטטוסים — מחזור החיים החדש ---
+# draft        — סטודנט עורך, לא הוגש למחסן
+# pending      — נשלח למחסן, בטיפול ('בטיפול')
+# ready        — מוכן לאיסוף, מחכה לסטודנט
+# checked_out  — סטודנט חתם ולקח את הציוד
+# returned     — מחסן סימן שהציוד הוחזר (חלקי או מלא)
+# closed       — סגור סופית
+# cancelled / rejected — מסלולי הפסקה
+ALL_STATUSES = {"draft", "pending", "ready", "checked_out", "returned", "closed", "cancelled", "rejected"}
+EDITABLE_STATUSES = {"draft", "pending", "ready", "checked_out", "returned"}  # אפשר לערוך פריטים/הערות
 FINAL_STATUSES = {"closed", "cancelled", "rejected"}
+# חוסם מלאי בטווח התאריכים (reservations): pending+ready=full requested, checked_out+returned=issued-returned
+RESERVES_FULL_STATUSES = {"pending", "ready"}
+RESERVES_ISSUED_STATUSES = {"checked_out", "returned"}
 
 
 def _parse_crew(raw):
@@ -56,27 +67,41 @@ def _equipment_available_in_range(
     start = start or now
     end = end or start
 
+    def _blocked_for_item(it: models.OrderItem) -> int:
+        """כמה יחידות נתפסות לפי הסטטוס. לפי המודל החדש:
+        - pending/ready: requested בלבד (לא יצא עדיין)
+        - checked_out/returned: כמה יצא בפועל פחות מה שחזר
+        """
+        st = it.order.status
+        if st in RESERVES_FULL_STATUSES:
+            return it.quantity or 1
+        if st in RESERVES_ISSUED_STATUSES:
+            return max(0, (it.quantity_issued or 0) - (it.quantity_returned or 0))
+        return 0
+
     blocking = 0
+    relevant_statuses = list(RESERVES_FULL_STATUSES | RESERVES_ISSUED_STATUSES)
     # 1) OrderItems שתופסים את הציוד הזה ישירות (לא דרך ערכה)
     items = db.query(models.OrderItem).join(models.Order).filter(
         models.OrderItem.equipment_id == equipment_id,
-        models.OrderItem.returned_at == None,
-        models.Order.status.in_(["pending", "active"]),
+        models.Order.status.in_(relevant_statuses),
     ).all()
     for it in items:
         if exclude_order_item_id and it.id == exclude_order_item_id:
+            continue
+        b = _blocked_for_item(it)
+        if not b:
             continue
         order = it.order
         o_start = order.loan_date or order.requested_at or now
         o_end = order.due_date or o_start
         if start <= o_end and end >= o_start:
-            blocking += it.quantity or 1
+            blocking += b
 
     # 2) OrderItems שהם ערכות, ובערכה יש את הציוד הזה
     kit_items = db.query(models.OrderItem).join(models.Order).filter(
         models.OrderItem.kit_id != None,
-        models.OrderItem.returned_at == None,
-        models.Order.status.in_(["pending", "active"]),
+        models.Order.status.in_(relevant_statuses),
     ).options(joinedload(models.OrderItem.kit).joinedload(models.Kit.items)).all()
     for it in kit_items:
         if not it.kit:
@@ -84,11 +109,14 @@ def _equipment_available_in_range(
         contains = next((ki for ki in it.kit.items if ki.equipment_id == equipment_id), None)
         if not contains:
             continue
+        b = _blocked_for_item(it)
+        if not b:
+            continue
         order = it.order
         o_start = order.loan_date or order.requested_at or now
         o_end = order.due_date or o_start
         if start <= o_end and end >= o_start:
-            blocking += (contains.quantity_needed or 1) * (it.quantity or 1)
+            blocking += (contains.quantity_needed or 1) * b
 
     return max(0, (eq.quantity or 0) - blocking)
 
@@ -251,12 +279,17 @@ def create_order(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    if current_user.role != "student":
-        raise HTTPException(status_code=403, detail="רק סטודנט יכול ליצור הזמנה")
+    if current_user.role not in ("student", "lecturer"):
+        raise HTTPException(status_code=403, detail="רק סטודנט או מרצה יכולים ליצור הזמנה")
+    if current_user.status == "blocked":
+        raise HTTPException(status_code=403, detail="המשתמש חסום — לא ניתן ליצור הזמנות חדשות")
+    if current_user.status == "graduate":
+        raise HTTPException(status_code=403, detail="משתמש בסטטוס 'בוגר' — אין הזמנות חדשות")
 
+    # מתחילים ב-'draft' — לא נראה למחסן עד שסטודנט שולח (submit)
     order = models.Order(
         student_id=current_user.id,
-        status="pending",
+        status="draft",
         notes=payload.notes,
         preferred_date=payload.preferred_date,
         loan_date=payload.loan_date,
@@ -267,9 +300,8 @@ def create_order(
     db.add(order)
     db.flush()
 
-    item_names = []
     for it_payload in payload.items:
-        kit, eq = _validate_item_payload(db, it_payload)
+        _validate_item_payload(db, it_payload)
         qty = max(1, int(it_payload.quantity or 1))
         oi = models.OrderItem(
             order_id=order.id,
@@ -279,28 +311,176 @@ def create_order(
             added_by=current_user.id,
         )
         db.add(oi)
-        if kit:
-            item_names.append(kit.name)
-        elif eq:
-            item_names.append(f"{eq.name}" + (f" x{qty}" if qty > 1 else ""))
 
     log_activity(
         db, user_id=current_user.id,
         action="order.created", entity_type="order", entity_id=order.id,
-        description=f"{current_user.name} פתח הזמנה ({len(payload.items)} פריטים)",
+        description=f"{current_user.name} פתח טיוטת הזמנה",
     )
-    summary = " · ".join(item_names[:4]) + (f" + {len(item_names)-4} נוספים" if len(item_names) > 4 else "")
-    for admin in db.query(models.User).filter(models.User.role == "admin", models.User.active == True).all():
-        notify(
-            db, user_id=admin.id, type_="new_order",
-            title=f"הזמנה חדשה — {len(payload.items)} פריטים",
-            body=f"{current_user.name}: {summary or '(ריקה — סטודנט עורך)'}",
-            link=f"/manager/orders/{order.id}",
-        )
+    # אין הודעה למנהל בשלב draft — הוא יקבל הודעה רק כשסטודנט שולח (submit)
 
     db.commit()
     db.refresh(order)
     return _enrich(_orders_query(db).filter(models.Order.id == order.id).first())
+
+
+# ----------------------------------------------------------------------------
+# PUT /orders/{id}/submit — סטודנט שולח את הטיוטה למחסן (draft → pending)
+# ----------------------------------------------------------------------------
+@router.put("/{order_id}/submit", response_model=schemas.OrderOut)
+def submit_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    o = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="הזמנה לא נמצאה")
+    if current_user.role == "student" and o.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="אין הרשאה")
+    if o.status != "draft":
+        raise HTTPException(status_code=400, detail=f"לא ניתן לשלוח — הסטטוס הנוכחי הוא '{o.status}'")
+    if not o.items:
+        raise HTTPException(status_code=400, detail="לא ניתן לשלוח הזמנה ריקה")
+
+    o.status = "pending"
+    o.last_modified_at = datetime.utcnow()
+
+    log_activity(
+        db, user_id=current_user.id, action="order.submitted",
+        entity_type="order", entity_id=o.id,
+        description=f"{current_user.name} שלח את ההזמנה #{o.id} למחסן ({len(o.items)} פריטים)",
+    )
+    # התראות למנהלים
+    item_names = []
+    for it in o.items:
+        if it.kit: item_names.append(it.kit.name)
+        elif it.equipment:
+            q = it.quantity or 1
+            item_names.append(f"{it.equipment.name}" + (f" x{q}" if q > 1 else ""))
+    summary = " · ".join(item_names[:4]) + (f" + {len(item_names)-4} נוספים" if len(item_names) > 4 else "")
+    for admin in db.query(models.User).filter(models.User.role == "admin", models.User.active == True).all():
+        notify(
+            db, user_id=admin.id, type_="new_order",
+            title=f"בקשה חדשה — {len(o.items)} פריטים",
+            body=f"{o.student.name if o.student else ''}: {summary}",
+            link=f"/manager/orders/{o.id}",
+        )
+
+    db.commit()
+    return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
+
+
+# ----------------------------------------------------------------------------
+# PUT /orders/{id}/mark_ready — מנהל מסמן שהציוד מוכן (pending → ready)
+# ----------------------------------------------------------------------------
+@router.put("/{order_id}/mark_ready", response_model=schemas.OrderOut)
+def mark_order_ready(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin)
+):
+    o = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="הזמנה לא נמצאה")
+    if o.status != "pending":
+        raise HTTPException(status_code=400, detail=f"לא ניתן לסמן מוכן — הסטטוס הנוכחי הוא '{o.status}'")
+
+    # ברירת מחדל: quantity_issued = quantity (מה שביקש, יוצא)
+    for it in o.items:
+        if not it.quantity_issued:
+            it.quantity_issued = it.quantity or 1
+
+    o.status = "ready"
+    o.approved_by = current_user.id
+    o.last_modified_at = datetime.utcnow()
+
+    log_activity(
+        db, user_id=current_user.id, action="order.ready",
+        entity_type="order", entity_id=o.id,
+        description=f"{current_user.name} סימן את ההזמנה #{o.id} כמוכנה לאיסוף",
+    )
+    notify(
+        db, user_id=o.student_id, type_="order_ready",
+        title="🎒 ההזמנה מוכנה לאיסוף",
+        body=f"הזמנה #{o.id} ({len(o.items)} פריטים) ממתינה לך במחסן",
+        link=f"/student/orders/{o.id}",
+    )
+    db.commit()
+    return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
+
+
+# ----------------------------------------------------------------------------
+# PUT /orders/{id}/check_out — סטודנט חתם וקיבל את הציוד (ready → checked_out)
+# ----------------------------------------------------------------------------
+@router.put("/{order_id}/check_out", response_model=schemas.OrderOut)
+def check_out_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    o = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="הזמנה לא נמצאה")
+    if current_user.role == "student" and o.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="אין הרשאה")
+    if o.status != "ready":
+        raise HTTPException(status_code=400, detail=f"לא ניתן לחתום — הסטטוס הנוכחי הוא '{o.status}'")
+
+    o.status = "checked_out"
+    o.last_modified_at = datetime.utcnow()
+    # אם quantity_issued לא נקבע — שווה למבוקש
+    for it in o.items:
+        if not it.quantity_issued:
+            it.quantity_issued = it.quantity or 1
+
+    log_activity(
+        db, user_id=current_user.id, action="order.checked_out",
+        entity_type="order", entity_id=o.id,
+        description=f"{current_user.name} חתם וקיבל את ההזמנה #{o.id}",
+    )
+    db.commit()
+    return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
+
+
+# ----------------------------------------------------------------------------
+# PUT /orders/{id}/mark_returned — מחסן מסמן שהציוד חזר (checked_out → returned)
+# ----------------------------------------------------------------------------
+@router.put("/{order_id}/mark_returned", response_model=schemas.OrderOut)
+def mark_order_returned(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin)
+):
+    o = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="הזמנה לא נמצאה")
+    if o.status not in {"checked_out", "ready"}:
+        raise HTTPException(status_code=400, detail=f"לא ניתן לסמן חזרה מסטטוס '{o.status}'")
+
+    # ברירת מחדל: quantity_returned = quantity_issued (הכל חזר)
+    for it in o.items:
+        if not it.quantity_returned:
+            it.quantity_returned = it.quantity_issued or it.quantity or 0
+        if not it.returned_at:
+            it.returned_at = datetime.utcnow()
+
+    o.status = "returned"
+    o.last_modified_at = datetime.utcnow()
+
+    log_activity(
+        db, user_id=current_user.id, action="order.returned",
+        entity_type="order", entity_id=o.id,
+        description=f"{current_user.name} סימן שההזמנה #{o.id} חזרה",
+    )
+    notify(
+        db, user_id=o.student_id, type_="order_returned",
+        title="ההזמנה סומנה כחוזרה",
+        body=f"הזמנה #{o.id} סומנה כחוזרה למחסן",
+        link=f"/student/orders/{o.id}",
+    )
+    db.commit()
+    return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
 
 
 # ----------------------------------------------------------------------------
@@ -426,6 +606,7 @@ def update_item(
         if current_user.role != "admin":
             raise HTTPException(status_code=403, detail="רק מנהל יכול לסמן החזרה")
         it.returned_at = datetime.utcnow()
+        it.quantity_returned = it.quantity_issued or it.quantity or 1
         o.last_modified_at = datetime.utcnow()
         log_activity(
             db, user_id=current_user.id, action="order.item_returned",
@@ -440,8 +621,19 @@ def update_item(
 
     if payload.quantity is not None:
         it.quantity = max(1, int(payload.quantity))
-    if payload.returned_at is not None and current_user.role == "admin":
-        it.returned_at = payload.returned_at
+
+    # quantity_issued / quantity_returned — מנהל בלבד
+    if current_user.role == "admin":
+        if payload.quantity_issued is not None:
+            it.quantity_issued = max(0, int(payload.quantity_issued))
+        if payload.quantity_returned is not None:
+            new_returned = max(0, int(payload.quantity_returned))
+            # מגביל ש-quantity_returned <= quantity_issued
+            it.quantity_returned = min(new_returned, it.quantity_issued or 0)
+            if it.quantity_returned > 0 and not it.returned_at:
+                it.returned_at = datetime.utcnow()
+        if payload.returned_at is not None:
+            it.returned_at = payload.returned_at
 
     o.last_modified_at = datetime.utcnow()
     db.commit()
@@ -526,22 +718,26 @@ def approve_order(
                 "hint": "ניתן לאשר בכל זאת עם force=true"
             })
 
-    o.status = "active"
+    # /approve הופך לכיסוי תאימות אחורה — מסמן 'ready' (מוכן לאיסוף)
+    o.status = "ready"
     o.loan_date = payload.loan_date
     o.due_date = payload.due_date
     o.manager_notes = payload.manager_notes
     o.approved_by = current_user.id
     o.last_modified_at = datetime.utcnow()
+    for it in o.items:
+        if not it.quantity_issued:
+            it.quantity_issued = it.quantity or 1
 
     log_activity(
         db, user_id=current_user.id, action="order.approved",
         entity_type="order", entity_id=o.id,
-        description=f"{current_user.name} אישר את ההזמנה #{o.id}",
+        description=f"{current_user.name} אישר וסימן את ההזמנה #{o.id} כמוכנה",
     )
     notify(
         db, user_id=o.student_id, type_="order_approved",
-        title="ההזמנה אושרה ✓",
-        body=f"הזמנה #{o.id} ({len(o.items)} פריטים) אושרה",
+        title="ההזמנה אושרה ומוכנה לאיסוף ✓",
+        body=f"הזמנה #{o.id} ({len(o.items)} פריטים) אושרה ומוכנה לאיסוף",
         link=f"/student/orders/{o.id}",
     )
     db.commit()

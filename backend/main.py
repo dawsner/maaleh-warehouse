@@ -29,6 +29,16 @@ def _run_migrations():
             if 'max_year' not in cols:
                 conn.execute(text("ALTER TABLE equipment ADD COLUMN max_year INTEGER DEFAULT 4"))
                 print("[migration] Added equipment.max_year")
+            if 'is_key_product' not in cols:
+                conn.execute(text("ALTER TABLE equipment ADD COLUMN is_key_product BOOLEAN DEFAULT 0"))
+                print("[migration] Added equipment.is_key_product")
+
+    if 'users' in inspector.get_table_names():
+        cols = {c['name'] for c in inspector.get_columns('users')}
+        with engine.begin() as conn:
+            if 'status' not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR DEFAULT 'active'"))
+                print("[migration] Added users.status")
 
     if 'orders' in inspector.get_table_names():
         cols = {c['name'] for c in inspector.get_columns('orders')}
@@ -39,6 +49,21 @@ def _run_migrations():
             if 'crew' not in cols:
                 conn.execute(text("ALTER TABLE orders ADD COLUMN crew TEXT"))
                 print("[migration] Added orders.crew")
+        # נירמול סטטוסים — 'active' הישן הופך ל-'checked_out' החדש
+        with engine.begin() as conn:
+            result = conn.execute(text("UPDATE orders SET status='checked_out' WHERE status='active'"))
+            if result.rowcount:
+                print(f"[migration] Renamed {result.rowcount} orders status active→checked_out")
+
+    if 'order_items' in inspector.get_table_names():
+        cols = {c['name'] for c in inspector.get_columns('order_items')}
+        with engine.begin() as conn:
+            if 'quantity_issued' not in cols:
+                conn.execute(text("ALTER TABLE order_items ADD COLUMN quantity_issued INTEGER DEFAULT 0"))
+                print("[migration] Added order_items.quantity_issued")
+            if 'quantity_returned' not in cols:
+                conn.execute(text("ALTER TABLE order_items ADD COLUMN quantity_returned INTEGER DEFAULT 0"))
+                print("[migration] Added order_items.quantity_returned")
 
     if 'loan_requests' in inspector.get_table_names():
         cols_info = inspector.get_columns('loan_requests')

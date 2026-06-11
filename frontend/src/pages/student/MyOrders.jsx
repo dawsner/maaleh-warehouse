@@ -1,25 +1,17 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ordersAPI } from '../../api'
+import { ordersAPI, ORDER_STATUS_META } from '../../api'
 import { format } from 'date-fns'
 
 const fmtDate = (d) => d ? format(new Date(d), 'dd/MM/yyyy') : '—'
 
 const TABS = [
-  { key: 'pending,active', label: 'פעילות' },
+  { key: 'draft,pending,ready,checked_out,returned', label: 'פעילות' },
   { key: 'closed,cancelled,rejected', label: 'סגורות' },
 ]
 
-const STATUS_META = {
-  pending:   { label: 'ממתינה לאישור', color: 'bg-amber-100 text-amber-800' },
-  active:    { label: 'פעילה',          color: 'bg-green-100 text-green-800' },
-  closed:    { label: 'סגורה',          color: 'bg-slate-200 text-slate-700' },
-  cancelled: { label: 'בוטלה',          color: 'bg-slate-100 text-slate-500' },
-  rejected:  { label: 'נדחתה',          color: 'bg-red-100 text-red-700' },
-}
-
 function StatusPill({ status }) {
-  const m = STATUS_META[status] || { label: status, color: 'bg-slate-100 text-slate-600' }
+  const m = ORDER_STATUS_META[status] || { label: status, color: 'bg-slate-100 text-slate-600' }
   return <span className={`text-xs font-bold px-2 py-1 rounded-lg ${m.color}`}>{m.label}</span>
 }
 

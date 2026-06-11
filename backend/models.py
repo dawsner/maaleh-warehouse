@@ -11,11 +11,16 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
-    role = Column(String, default="student")  # 'admin' or 'student'
-    year = Column(Integer, nullable=True)  # 1-4 for students
+    role = Column(String, default="student")  # 'admin' / 'student' / 'lecturer'
+    year = Column(Integer, nullable=True)  # 1-5 for students; null for staff
     student_id = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     active = Column(Boolean, default=True)
+    # סטטוס לימודי/מערכתי — נפרד מ-active שמייצג "קיים":
+    #   active   — מורשה להזמין
+    #   graduate — בוגר, ארכיון; אין הזמנות חדשות
+    #   blocked  — חסום זמנית (הושעה משמעת/חוב)
+    status = Column(String, default="active")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     loans = relationship("LoanRequest", back_populates="student", foreign_keys="LoanRequest.student_id")
@@ -40,6 +45,8 @@ class Equipment(Base):
     # שיוך לשנה (כמו ערכה) — סטודנט בשנה X יראה רק פריטים שמתאימים לטווח
     min_year = Column(Integer, default=1)
     max_year = Column(Integer, default=4)
+    # "מוצר מפתח" — הגבלת מלאי קשיחה (מצלמה/זום). שאר הציוד (שקי חול) — אין הגבלה
+    is_key_product = Column(Boolean, default=False)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -165,7 +172,13 @@ class Order(Base):
 
 
 class OrderItem(Base):
-    """פריט בהזמנה. או ערכה (kit_id) או פריט בודד (equipment_id)."""
+    """פריט בהזמנה. או ערכה (kit_id) או פריט בודד (equipment_id).
+    שלוש כמויות מסוכרנות:
+      - quantity         : מה הסטודנט ביקש (הוזמן)
+      - quantity_issued  : מה המחסן הקצה / יצא בפועל לסטודנט
+      - quantity_returned: מה הוחזר פיזית למחסן
+    סימון צבע ב-UI כשהיצא ≠ הוזמן.
+    """
     __tablename__ = "order_items"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -173,7 +186,9 @@ class OrderItem(Base):
     kit_id = Column(Integer, ForeignKey("kits.id"), nullable=True)
     equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=True)
     quantity = Column(Integer, default=1)
-    returned_at = Column(DateTime, nullable=True)  # מתי נרשם שחזר (פר-פריט)
+    quantity_issued = Column(Integer, default=0)     # מה יצא בפועל
+    quantity_returned = Column(Integer, default=0)   # מה חזר בפועל
+    returned_at = Column(DateTime, nullable=True)    # מתי נרשם שחזר (תאימות אחורה)
     added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow)
 

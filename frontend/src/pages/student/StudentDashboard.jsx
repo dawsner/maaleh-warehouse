@@ -45,8 +45,9 @@ export default function StudentDashboard() {
     }
   }, [])
 
-  const activeOrders = orders.filter(o => o.status === 'active')
-  const pendingOrders = orders.filter(o => o.status === 'pending')
+  // "פעילות" = הזמנות שלא נסגרו עדיין (כולל draft/pending/ready/checked_out/returned)
+  const activeOrders = orders.filter(o => ['ready','checked_out','returned'].includes(o.status))
+  const pendingOrders = orders.filter(o => ['draft','pending'].includes(o.status))
   const recentOrders = orders.slice(0, 4)
 
   return (
@@ -129,7 +130,7 @@ export default function StudentDashboard() {
                   <p className="font-medium text-slate-800 text-sm">הזמנה #{o.id} — {o.item_count} פריטים</p>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {fmtDate(o.requested_at)}
-                    {o.due_date && o.status === 'active' && ` · יעד החזרה: ${fmtDate(o.due_date)}`}
+                    {o.due_date && ['ready','checked_out'].includes(o.status) && ` · יעד החזרה: ${fmtDate(o.due_date)}`}
                   </p>
                 </div>
                 <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">{o.status}</span>
