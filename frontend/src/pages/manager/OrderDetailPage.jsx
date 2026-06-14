@@ -19,30 +19,47 @@ const TABS = [
   { key: 'order',     label: '📋 בהזמנה' },
 ]
 
-/** Input של כמות עם debounce. accent קובע צבע: 'requested' / 'issued' / 'returned' / 'gap' (כשיש סטיה). */
-function QtyInput({ value, max, onChange, disabled, accent = 'requested' }) {
-  const [local, setLocal] = useState(value || 0)
+/** Input של כמות עם debounce. accent קובע צבע + תצוגה. allowEmpty=true → null מציג "—". */
+function QtyInput({ value, max, onChange, disabled, accent = 'requested', allowEmpty = false }) {
+  // local יכול להיות '' (ריק) או מספר; null מתורגם ל''
+  const toLocal = (v) => (v === null || v === undefined) ? (allowEmpty ? '' : 0) : v
+  const [local, setLocal] = useState(toLocal(value))
   const timeoutRef = useRef(null)
-  useEffect(() => { setLocal(value || 0) }, [value])
+  useEffect(() => { setLocal(toLocal(value)) }, [value])
+
   const handleChange = (v) => {
+    // ריק = null (אם allowEmpty), אחרת 0
+    if (v === '' && allowEmpty) {
+      setLocal('')
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => onChange(null), 400)
+      return
+    }
     const n = Math.max(0, parseInt(v) || 0)
     setLocal(n)
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => onChange(n), 400)
   }
+
+  // צבע ברקע — מבוסס accent
+  const isEmpty = local === '' || local === null || local === undefined
+  const isZero = local === 0
   const colors = {
-    requested: local > 0 ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-400',
-    issued:    local > 0 ? 'bg-green-50 border-green-300 text-green-700'      : 'bg-white border-slate-200 text-slate-400',
-    returned:  local > 0 ? 'bg-purple-50 border-purple-300 text-purple-700'   : 'bg-white border-slate-200 text-slate-400',
-    gap:       'bg-rose-50 border-rose-400 text-rose-700 ring-2 ring-rose-200',
+    requested: local > 0 ? 'bg-sky-50 border-sky-300 text-sky-700'           : 'bg-white border-slate-200 text-slate-400',
+    issued:    local > 0 ? 'bg-orange-50 border-orange-300 text-orange-700'  : (isEmpty ? 'bg-white border-slate-200 text-slate-300' : 'bg-white border-slate-200 text-slate-400'),
+    returned:  local > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-700': (isEmpty ? 'bg-white border-slate-200 text-slate-300' : 'bg-white border-slate-200 text-slate-400'),
+    gap:       'bg-rose-100 border-rose-500 text-rose-800 ring-2 ring-rose-300 font-extrabold',
   }
   return (
     <input
       type="number"
       min={0}
-      value={local}
+      value={isEmpty ? '' : local}
+      placeholder={allowEmpty ? '—' : '0'}
       onChange={e => handleChange(e.target.value)}
-      onBlur={() => { if (timeoutRef.current) { clearTimeout(timeoutRef.current); onChange(local) } }}
+      onBlur={() => {
+        if (timeoutRef.current) { clearTimeout(timeoutRef.current); onChange(isEmpty && allowEmpty ? null : local) }
+      }}
       disabled={disabled}
       className={`w-16 text-center font-bold rounded-lg border py-1.5 text-sm ${colors[accent]} ${disabled ? 'opacity-50' : ''}`}
     />
@@ -60,7 +77,7 @@ function CrewEditor({ crew, onChange, disabled }) {
     const newList = []
     CREW_ROLES.forEach(r => {
       const v = r === role ? name : (byRole[r] || '')
-      if (v.trim()) newList.push({ role: r, name: v.trim() })
+      if (v && v.trim()) newList.push({ role: r, name: v })
     })
     onChange(newList)
   }
@@ -69,12 +86,12 @@ function CrewEditor({ crew, onChange, disabled }) {
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {CREW_ROLES.map(role => (
         <div key={role} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
-          <span className="text-xs font-semibold text-slate-600 w-24 flex-shrink-0">{role}</span>
+          <span className="text-xs font-semibold text-slate-600 w-28 flex-shrink-0">{role}</span>
           <input
             type="text"
             value={byRole[role] || ''}
             onChange={e => setName(role, e.target.value)}
-            placeholder="שם המבצע"
+            placeholder="שם"
             disabled={disabled}
             className="flex-1 border border-slate-200 rounded-md px-2 py-1 text-sm bg-white"
           />
@@ -392,16 +409,6 @@ export default function OrderDetailPage() {
             </div>
           )}
           {order.status === 'checked_out' && (
-            <button onClick={async () => {
-              if (!confirm('לסמן שכל הציוד חזר למחסן?')) return
-              try { await ordersAPI.markReturned(id); load(true, true) }
-              catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
-            }}
-              className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm">
-              🔄 סמן חזר
-            </button>
-          )}
-          {(order.status === 'returned' || order.status === 'checked_out') && (
             <button onClick={handleClose} className="bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold px-4 py-2 rounded-xl">🔒 סגור הזמנה</button>
           )}
         </div>
@@ -488,9 +495,9 @@ export default function OrderDetailPage() {
                 <tr>
                   <th className="text-right px-4 py-2 font-semibold">פריט</th>
                   <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
-                  <th className="text-right px-3 py-2 font-semibold text-primary-700">🔵 הוזמן</th>
-                  <th className="text-right px-3 py-2 font-semibold text-green-700">🟢 יצא</th>
-                  <th className="text-right px-3 py-2 font-semibold text-purple-700">🟣 חזר</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-sky-50 text-sky-700">הוזמן</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-orange-50 text-orange-700">יצא</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-emerald-50 text-emerald-700">חזר</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -499,37 +506,38 @@ export default function OrderDetailPage() {
                   const name = it.kit?.name || it.equipment?.name || 'פריט'
                   const cat = it.kit?.category || it.equipment?.category || '—'
                   const req = it.quantity || 0
-                  const iss = it.quantity_issued || 0
-                  const ret = it.quantity_returned || 0
-                  const gap = iss > 0 && iss !== req
-                  const partialReturn = iss > 0 && ret > 0 && ret < iss
-                  const fullyReturned = iss > 0 && ret >= iss
+                  // null = "טרם נקבע"; 0 = "סומן במפורש"
+                  const iss = it.quantity_issued
+                  const ret = it.quantity_returned
+                  const issNum = iss ?? null
+                  const retNum = ret ?? null
+                  // פערים: יצא מוגדר ושונה מהוזמן; חזר מוגדר ושונה מהיצא
+                  const gapIssued = issNum !== null && issNum !== req
+                  const gapReturned = retNum !== null && issNum !== null && retNum !== issNum
+                  const hasAnyGap = gapIssued || gapReturned
                   return (
-                    <tr key={it.id} className={
-                      fullyReturned ? 'bg-purple-50/40' :
-                      partialReturn ? 'bg-amber-50/40' :
-                      gap ? 'bg-rose-50/30' : ''
-                    }>
+                    <tr key={it.id} className={hasAnyGap ? 'bg-rose-50 border-l-4 border-rose-500' : ''}>
                       <td className="px-4 py-2.5 font-bold">
+                        {hasAnyGap && <span className="text-rose-600 font-extrabold mr-1">⚠</span>}
                         {isKit ? '🎒' : '📦'} {name}
-                        {fullyReturned && <span className="text-xs text-purple-600 mr-2">✓ הכל חזר</span>}
-                        {gap && !fullyReturned && <span className="text-xs text-rose-600 mr-2">⚠ פער</span>}
+                        {gapIssued && <span className="text-[10px] text-rose-600 mr-2 font-bold">פער יצא</span>}
+                        {gapReturned && <span className="text-[10px] text-rose-600 mr-2 font-bold">פער חזרה</span>}
                       </td>
                       <td className="px-4 py-2.5 text-slate-500">{cat}</td>
-                      <td className="px-3 py-2.5">
-                        <QtyInput value={req} accent={gap ? 'gap' : 'requested'}
+                      <td className="px-3 py-2.5 bg-sky-50/30">
+                        <QtyInput value={req} accent="requested"
                           onChange={v => setItemQty(isKit ? 'kit' : 'equipment', isKit ? it.kit_id : it.equipment_id, v)}
                           disabled={!editable} />
                       </td>
-                      <td className="px-3 py-2.5">
-                        <QtyInput value={iss} accent="issued" max={req}
+                      <td className="px-3 py-2.5 bg-orange-50/30">
+                        <QtyInput value={issNum} allowEmpty accent={gapIssued ? 'gap' : 'issued'}
                           onChange={v => setItemIssued(it.id, v)}
-                          disabled={!editable || !(['pending','ready','checked_out','returned'].includes(order.status))} />
+                          disabled={!editable || !(['pending','ready','checked_out'].includes(order.status))} />
                       </td>
-                      <td className="px-3 py-2.5">
-                        <QtyInput value={ret} accent="returned" max={iss}
+                      <td className="px-3 py-2.5 bg-emerald-50/30">
+                        <QtyInput value={retNum} allowEmpty accent={gapReturned ? 'gap' : 'returned'}
                           onChange={v => setItemReturned(it.id, v)}
-                          disabled={!editable || !(['checked_out','returned'].includes(order.status))} />
+                          disabled={!editable || order.status !== 'checked_out'} />
                       </td>
                     </tr>
                   )

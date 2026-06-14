@@ -29,7 +29,7 @@ EDITABLE_STATUSES = {"draft", "pending", "ready", "checked_out", "returned"}  # 
 FINAL_STATUSES = {"closed", "cancelled", "rejected"}
 # חוסם מלאי בטווח התאריכים (reservations): pending+ready=full requested, checked_out+returned=issued-returned
 RESERVES_FULL_STATUSES = {"pending", "ready"}
-RESERVES_ISSUED_STATUSES = {"checked_out", "returned"}
+RESERVES_ISSUED_STATUSES = {"checked_out"}  # 'returned' הוסר — quantity_returned לבדו מספיק
 
 
 def _parse_crew(raw):
@@ -68,15 +68,18 @@ def _equipment_available_in_range(
     end = end or start
 
     def _blocked_for_item(it: models.OrderItem) -> int:
-        """כמה יחידות נתפסות לפי הסטטוס. לפי המודל החדש:
-        - pending/ready: requested בלבד (לא יצא עדיין)
-        - checked_out/returned: כמה יצא בפועל פחות מה שחזר
+        """כמה יחידות נתפסות לפי הסטטוס.
+        - pending/ready: requested (שריון רך לתאריכים)
+        - checked_out: כמה יצא בפועל (issued) פחות מה שחזר (returned)
+                       null מתפרש כ-0 (טרם נקבע = לא נחשב כפיזית בחוץ)
         """
         st = it.order.status
         if st in RESERVES_FULL_STATUSES:
             return it.quantity or 1
         if st in RESERVES_ISSUED_STATUSES:
-            return max(0, (it.quantity_issued or 0) - (it.quantity_returned or 0))
+            issued = it.quantity_issued if it.quantity_issued is not None else 0
+            returned = it.quantity_returned if it.quantity_returned is not None else 0
+            return max(0, issued - returned)
         return 0
 
     blocking = 0
@@ -286,6 +289,14 @@ def create_order(
     if current_user.status == "graduate":
         raise HTTPException(status_code=403, detail="משתמש בסטטוס 'בוגר' — אין הזמנות חדשות")
 
+    # auto-fill: אם לא צויין צוות, מאכלסים את "במאי" בשם המגיש (סטודנט/מרצה)
+    initial_crew = payload.crew
+    if not initial_crew:
+        initial_crew = [schemas.CrewMember(role="במאי", name=current_user.name)]
+    elif not any((c.role == "במאי" if hasattr(c, 'role') else c.get('role') == "במאי") for c in initial_crew):
+        # אם יש צוות אבל בלי במאי — מוסיפים
+        initial_crew = list(initial_crew) + [schemas.CrewMember(role="במאי", name=current_user.name)]
+
     # מתחילים ב-'draft' — לא נראה למחסן עד שסטודנט שולח (submit)
     order = models.Order(
         student_id=current_user.id,
@@ -295,7 +306,7 @@ def create_order(
         loan_date=payload.loan_date,
         due_date=payload.due_date,
         production_name=payload.production_name,
-        crew=_serialize_crew(payload.crew),
+        crew=_serialize_crew(initial_crew),
     )
     db.add(order)
     db.flush()
@@ -386,11 +397,7 @@ def mark_order_ready(
     if o.status != "pending":
         raise HTTPException(status_code=400, detail=f"לא ניתן לסמן מוכן — הסטטוס הנוכחי הוא '{o.status}'")
 
-    # ברירת מחדל: quantity_issued = quantity (מה שביקש, יוצא)
-    for it in o.items:
-        if not it.quantity_issued:
-            it.quantity_issued = it.quantity or 1
-
+    # אין auto-fill — המנהל יקבע quantity_issued ידנית
     o.status = "ready"
     o.approved_by = current_user.id
     o.last_modified_at = datetime.utcnow()
@@ -400,6 +407,8 @@ def mark_order_ready(
         entity_type="order", entity_id=o.id,
         description=f"{current_user.name} סימן את ההזמנה #{o.id} כמוכנה לאיסוף",
     )
+
+    # 'mark_ready' לא ממלא יותר quantity_issued אוטומטית — המנהל יקבע ידנית
     notify(
         db, user_id=o.student_id, type_="order_ready",
         title="🎒 ההזמנה מוכנה לאיסוף",
@@ -429,10 +438,7 @@ def check_out_order(
 
     o.status = "checked_out"
     o.last_modified_at = datetime.utcnow()
-    # אם quantity_issued לא נקבע — שווה למבוקש
-    for it in o.items:
-        if not it.quantity_issued:
-            it.quantity_issued = it.quantity or 1
+    # אין auto-fill — אם המנהל לא קבע quantity_issued, יישאר ריק עד שיקבע
 
     log_activity(
         db, user_id=current_user.id, action="order.checked_out",
@@ -725,9 +731,7 @@ def approve_order(
     o.manager_notes = payload.manager_notes
     o.approved_by = current_user.id
     o.last_modified_at = datetime.utcnow()
-    for it in o.items:
-        if not it.quantity_issued:
-            it.quantity_issued = it.quantity or 1
+    # אין auto-fill ל-quantity_issued — המנהל קובע ידנית
 
     log_activity(
         db, user_id=current_user.id, action="order.approved",

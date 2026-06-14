@@ -22,60 +22,70 @@ const TABS = [
 ]
 
 /**
- * שורה אחת בטבלת ספרדשיט.
- * הסטודנט מקליד מספר ב-input — אם המספר השתנה, נקרא ל-onChange (debounced).
+ * Input של כמות עם debounce + accent (צבע) + allowEmpty (לעמודות יצא/חזר).
  */
-function QtyInput({ value, max, onChange, disabled }) {
-  const [local, setLocal] = useState(value || 0)
+function QtyInput({ value, max, onChange, disabled, accent = 'requested', allowEmpty = false }) {
+  const toLocal = (v) => (v === null || v === undefined) ? (allowEmpty ? '' : 0) : v
+  const [local, setLocal] = useState(toLocal(value))
   const timeoutRef = useRef(null)
-
-  useEffect(() => { setLocal(value || 0) }, [value])
+  useEffect(() => { setLocal(toLocal(value)) }, [value])
 
   const handleChange = (v) => {
+    if (v === '' && allowEmpty) {
+      setLocal('')
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => onChange && onChange(null), 400)
+      return
+    }
     const n = Math.max(0, Math.min(max ?? 9999, parseInt(v) || 0))
     setLocal(n)
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(() => onChange(n), 400)
+    timeoutRef.current = setTimeout(() => onChange && onChange(n), 400)
   }
 
+  const isEmpty = local === '' || local === null || local === undefined
+  const colors = {
+    requested: local > 0 ? 'bg-sky-50 border-sky-300 text-sky-700'           : 'bg-white border-slate-200 text-slate-400',
+    issued:    local > 0 ? 'bg-orange-50 border-orange-300 text-orange-700'  : 'bg-white border-slate-200 text-slate-300',
+    returned:  local > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-700': 'bg-white border-slate-200 text-slate-300',
+    gap:       'bg-rose-100 border-rose-500 text-rose-800 ring-2 ring-rose-300 font-extrabold',
+  }
   return (
     <input
       type="number"
       min={0}
       max={max ?? undefined}
-      value={local}
+      value={isEmpty ? '' : local}
+      placeholder={allowEmpty ? '—' : '0'}
       onChange={e => handleChange(e.target.value)}
-      onBlur={() => { if (timeoutRef.current) { clearTimeout(timeoutRef.current); onChange(local) } }}
+      onBlur={() => { if (timeoutRef.current && onChange) { clearTimeout(timeoutRef.current); onChange(isEmpty && allowEmpty ? null : local) } }}
       disabled={disabled}
-      className={`w-16 text-center font-bold rounded-lg border py-1.5 text-sm
-        ${local > 0 ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-400'}
-        ${disabled ? 'opacity-50' : ''}`}
+      className={`w-16 text-center font-bold rounded-lg border py-1.5 text-sm ${colors[accent]} ${disabled ? 'opacity-60' : ''}`}
     />
   )
 }
 
 /**
- * עורך אנשי צוות — רשימה קבועה של תפקידים מהקובץ הראשי.
- * תפקיד = שם תפקיד בעמודה אחת (קבוע), שם בעל התפקיד בעמודה הבאה (חופשי).
- * תפקיד שלא רוצים — משאירים ריק.
+ * עורך אנשי צוות — 7 תפקידי ליבה.
+ * תפקיד = שם תפקיד בעמודה אחת (קבוע), שם בעל התפקיד בעמודה הבאה.
+ * שמירת רווחים מתבצעת ע״י דחיפת ה-name כמו שהוא; טרים רק על-ידי השרת בעת שמירה.
  */
 function CrewEditor({ crew, onChange, disabled }) {
-  // ממירים crew מהשרת לפי תפקיד; אם רוצים תפקיד שלא ברשימה — מוסיפים שורה גמישה
   const byRole = useMemo(() => {
     const m = {}
     ;(crew || []).forEach(c => {
       if (c?.role) m[c.role] = c.name || ''
-      else if (c?.name) m[`__free_${Object.keys(m).length}`] = c.name
     })
     return m
   }, [crew])
 
   const setName = (role, name) => {
     const newList = []
-    // עוברים על כל תפקיד קבוע, שומרים מי שיש לו שם
     CREW_ROLES.forEach(r => {
       const v = r === role ? name : (byRole[r] || '')
-      if (v.trim()) newList.push({ role: r, name: v.trim() })
+      // לא לעשות trim כאן — אחרת רווחים מאמצע מילים נמחקים בזמן הקלדה.
+      // נשמר רק אם יש משהו לא-ריק.
+      if (v && v.trim()) newList.push({ role: r, name: v })
     })
     onChange(newList)
   }
@@ -84,12 +94,12 @@ function CrewEditor({ crew, onChange, disabled }) {
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {CREW_ROLES.map(role => (
         <div key={role} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
-          <span className="text-xs font-semibold text-slate-600 w-24 flex-shrink-0">{role}</span>
+          <span className="text-xs font-semibold text-slate-600 w-28 flex-shrink-0">{role}</span>
           <input
             type="text"
             value={byRole[role] || ''}
             onChange={e => setName(role, e.target.value)}
-            placeholder="שם המבצע"
+            placeholder="שם"
             disabled={disabled}
             className="flex-1 border border-slate-200 rounded-md px-2 py-1 text-sm bg-white"
           />
@@ -451,12 +461,22 @@ export default function OrderDetail() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
-              <tr>
-                <th className="text-right px-4 py-2 font-semibold">פריט</th>
-                <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
-                <th className="text-right px-4 py-2 font-semibold">זמין</th>
-                <th className="text-right px-4 py-2 font-semibold">כמות מוזמנת</th>
-              </tr>
+              {tab === 'order' ? (
+                <tr>
+                  <th className="text-right px-4 py-2 font-semibold">פריט</th>
+                  <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-sky-50 text-sky-700">הוזמן</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-orange-50 text-orange-700">יצא בפועל</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-emerald-50 text-emerald-700">חזר</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="text-right px-4 py-2 font-semibold">פריט</th>
+                  <th className="text-right px-4 py-2 font-semibold">קטגוריה</th>
+                  <th className="text-right px-4 py-2 font-semibold">זמין</th>
+                  <th className="text-right px-4 py-2 font-semibold">כמות מוזמנת</th>
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-slate-50">
               {tab === 'kits' && filteredKits.map(k => {
@@ -500,28 +520,35 @@ export default function OrderDetail() {
                 const isKit = !!it.kit
                 const name = it.kit?.name || it.equipment?.name || 'פריט'
                 const cat = it.kit?.category || it.equipment?.category || '—'
+                const req = it.quantity || 0
+                const iss = it.quantity_issued
+                const ret = it.quantity_returned
+                const gapIssued = iss !== null && iss !== undefined && iss !== req
+                const gapReturned = ret !== null && ret !== undefined && iss !== null && iss !== undefined && ret !== iss
+                const hasGap = gapIssued || gapReturned
                 return (
-                  <tr key={it.id} className={it.returned_at ? 'bg-green-50/30' : ''}>
+                  <tr key={it.id} className={hasGap ? 'bg-rose-50 border-l-4 border-rose-500' : ''}>
                     <td className="px-4 py-2.5 font-bold">
-                      <span className={it.returned_at ? 'text-slate-400 line-through' : 'text-slate-800'}>
-                        {isKit ? '🎒' : '📦'} {name}
-                      </span>
-                      {it.returned_at && <span className="text-xs text-green-600 mr-2">✓ הוחזר</span>}
+                      {hasGap && <span className="text-rose-600 font-extrabold mr-1">⚠</span>}
+                      <span className="text-slate-800">{isKit ? '🎒' : '📦'} {name}</span>
                     </td>
                     <td className="px-4 py-2.5 text-slate-500">{cat}</td>
-                    <td className="px-4 py-2.5 text-slate-600">—</td>
-                    <td className="px-4 py-2.5">
-                      {!it.returned_at ? (
-                        <QtyInput value={it.quantity} onChange={v => setItemQty(isKit ? 'kit' : 'equipment', isKit ? it.kit_id : it.equipment_id, v)} disabled={!editable} />
-                      ) : (
-                        <span className="text-sm text-slate-400">×{it.quantity}</span>
-                      )}
+                    <td className="px-3 py-2.5 bg-sky-50/30">
+                      <QtyInput value={req} accent="requested"
+                        onChange={v => setItemQty(isKit ? 'kit' : 'equipment', isKit ? it.kit_id : it.equipment_id, v)}
+                        disabled={!editable} />
+                    </td>
+                    <td className="px-3 py-2.5 bg-orange-50/30">
+                      <QtyInput value={iss ?? null} allowEmpty accent={gapIssued ? 'gap' : 'issued'} disabled={true} />
+                    </td>
+                    <td className="px-3 py-2.5 bg-emerald-50/30">
+                      <QtyInput value={ret ?? null} allowEmpty accent={gapReturned ? 'gap' : 'returned'} disabled={true} />
                     </td>
                   </tr>
                 )
               })}
               {(tab === 'order' && order.items.length === 0) && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">אין פריטים בהזמנה — עבור ל"ערכות" או "ציוד" כדי להוסיף</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">אין פריטים בהזמנה — עבור ל"ערכות" או "ציוד" כדי להוסיף</td></tr>
               )}
             </tbody>
           </table>

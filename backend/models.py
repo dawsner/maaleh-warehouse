@@ -186,9 +186,10 @@ class OrderItem(Base):
     kit_id = Column(Integer, ForeignKey("kits.id"), nullable=True)
     equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=True)
     quantity = Column(Integer, default=1)
-    quantity_issued = Column(Integer, default=0)     # מה יצא בפועל
-    quantity_returned = Column(Integer, default=0)   # מה חזר בפועל
-    returned_at = Column(DateTime, nullable=True)    # מתי נרשם שחזר (תאימות אחורה)
+    # null = "טרם נקבע"; 0 = "המנהל סימן במפורש שלא יצא/חזר" (ייחשב כפער)
+    quantity_issued = Column(Integer, nullable=True)
+    quantity_returned = Column(Integer, nullable=True)
+    returned_at = Column(DateTime, nullable=True)    # תאימות אחורה
     added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow)
 

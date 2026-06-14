@@ -7,9 +7,10 @@ const fmtDate = (d) => d ? format(new Date(d), 'dd/MM/yyyy') : '—'
 const yearLabel = (y) => y ? `שנה ${['','א','ב','ג','ד'][y] || y}'` : '—'
 
 const TABS = [
-  { key: 'pending',                          label: 'בטיפול' },
-  { key: 'ready,checked_out,returned',       label: 'בתהליך' },
-  { key: 'closed,cancelled,rejected',        label: 'סגורות' },
+  { key: 'pending',                       label: 'הוזמן',  color: 'sky' },
+  { key: 'ready,checked_out',             label: 'יצא',    color: 'orange' },
+  { key: 'returned',                      label: 'חזר',    color: 'emerald' },
+  { key: 'closed,cancelled,rejected',     label: 'סגור',   color: 'slate' },
 ]
 
 function StatusPill({ status }) {
