@@ -572,12 +572,25 @@ export default function OrderDetailPage() {
                 })}
                 {tab === 'equipment' && filteredEq.map(e => {
                   const existing = itemsByEquipment[e.id]
-                  const av = availability.equipment[e.id]?.available ?? e.quantity
+                  const inv = availability.equipment[e.id] || {}
+                  const av = inv.available ?? e.quantity
+                  const reserved = inv.reserved ?? 0
+                  const checkedOut = inv.checked_out ?? 0
                   return (
                     <tr key={e.id} className={existing ? 'bg-primary-50/30' : ''}>
-                      <td className="px-4 py-2.5 font-bold">📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}</td>
+                      <td className="px-4 py-2.5 font-bold">
+                        {e.is_key_product && <span title="מוצר מפתח" className="mr-1">🔑</span>}
+                        📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-slate-500">{e.category}</td>
-                      <td className="px-4 py-2.5 text-slate-600">{av} / {e.quantity}</td>
+                      <td className="px-4 py-2.5 text-xs">
+                        <span className="text-slate-500">סה״כ </span><span className="font-bold text-slate-700">{e.quantity}</span>
+                        {reserved > 0 && <><span className="text-sky-700 mr-2 font-bold">·{reserved}</span><span className="text-sky-600">שמור</span></>}
+                        {checkedOut > 0 && <><span className="text-orange-700 mr-2 font-bold">·{checkedOut}</span><span className="text-orange-600">בחוץ</span></>}
+                        <div className={`mt-0.5 font-bold ${av === 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                          זמין: {av}
+                        </div>
+                      </td>
                       <td className="px-4 py-2.5"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('equipment', e.id, v)} disabled={!editable} /></td>
                     </tr>
                   )

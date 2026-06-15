@@ -215,6 +215,79 @@ def _validate_item_payload(db: Session, item: schemas.OrderItemCreate):
 # ----------------------------------------------------------------------------
 # GET /orders
 # ----------------------------------------------------------------------------
+def _equipment_breakdown_in_range(
+    equipment_id: int,
+    db: Session,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+) -> dict:
+    """חלוקת מלאי לפריט ציוד: total / reserved / checked_out / available.
+    reserved   = מה ש-pending/ready הזמינו (שריון רך)
+    checked_out = מה ש-checked_out (יצא − חזר) — בחוץ פיזית
+    available  = total − reserved − checked_out
+    """
+    eq = db.query(models.Equipment).filter(models.Equipment.id == equipment_id).first()
+    if not eq or not eq.active:
+        return {"total": 0, "reserved": 0, "checked_out": 0, "available": 0}
+    now = datetime.utcnow()
+    start = start or now
+    end = end or start
+
+    reserved = 0
+    checked_out_count = 0
+
+    # ישיר (לא ערכה)
+    direct = db.query(models.OrderItem).join(models.Order).filter(
+        models.OrderItem.equipment_id == equipment_id,
+        models.Order.status.in_(["pending", "ready", "checked_out"]),
+    ).all()
+    for it in direct:
+        order = it.order
+        o_start = order.loan_date or order.requested_at or now
+        o_end = order.due_date or o_start
+        if not (start <= o_end and end >= o_start):
+            continue
+        if order.status in ("pending", "ready"):
+            reserved += it.quantity or 1
+        else:  # checked_out
+            issued = it.quantity_issued if it.quantity_issued is not None else 0
+            returned = it.quantity_returned if it.quantity_returned is not None else 0
+            checked_out_count += max(0, issued - returned)
+
+    # דרך ערכה
+    kit_items = db.query(models.OrderItem).join(models.Order).filter(
+        models.OrderItem.kit_id != None,
+        models.Order.status.in_(["pending", "ready", "checked_out"]),
+    ).options(joinedload(models.OrderItem.kit).joinedload(models.Kit.items)).all()
+    for it in kit_items:
+        if not it.kit:
+            continue
+        contains = next((ki for ki in it.kit.items if ki.equipment_id == equipment_id), None)
+        if not contains:
+            continue
+        order = it.order
+        o_start = order.loan_date or order.requested_at or now
+        o_end = order.due_date or o_start
+        if not (start <= o_end and end >= o_start):
+            continue
+        per_unit = contains.quantity_needed or 1
+        if order.status in ("pending", "ready"):
+            reserved += per_unit * (it.quantity or 1)
+        else:
+            issued = it.quantity_issued if it.quantity_issued is not None else 0
+            returned = it.quantity_returned if it.quantity_returned is not None else 0
+            checked_out_count += per_unit * max(0, issued - returned)
+
+    total = eq.quantity or 0
+    available = max(0, total - reserved - checked_out_count)
+    return {
+        "total": total,
+        "reserved": reserved,
+        "checked_out": checked_out_count,
+        "available": available,
+    }
+
+
 @router.get("/availability/check")
 def check_availability(
     start: datetime = Query(..., description="מתאריך"),
@@ -222,17 +295,30 @@ def check_availability(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """בודק זמינות לכל הציוד וכל הערכות בטווח התאריכים הנתון.
-    מחזיר {equipment: {id: available}, kits: {id: available}}.
-    משמש את ה-UI להציג רק פריטים זמינים בטווח."""
+    """בודק זמינות + פירוט מלאי לכל הציוד וכל הערכות בטווח התאריכים.
+    מחזיר {equipment: {id: {total, reserved, checked_out, available}}, kits: {id: {available}}}.
+    """
     equipment_av = {}
     for eq in db.query(models.Equipment).filter(models.Equipment.active == True).all():
-        avail = _equipment_available_in_range(eq.id, 1, db, start=start, end=end)
-        equipment_av[eq.id] = {"available": avail, "total": eq.quantity}
+        equipment_av[eq.id] = _equipment_breakdown_in_range(eq.id, db, start=start, end=end)
     kits_av = {}
     for k in db.query(models.Kit).filter(models.Kit.active == True).all():
         kits_av[k.id] = {"available": _kit_available_in_range(k.id, db, start=start, end=end)}
     return {"equipment": equipment_av, "kits": kits_av, "start": start, "end": end}
+
+
+@router.get("/inventory/now")
+def inventory_now(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """פירוט מלאי לפי הזמן הנוכחי — לתצוגה בעמוד ניהול ציוד.
+    מחזיר {equipment: {id: {total, reserved, checked_out, available}}}."""
+    now = datetime.utcnow()
+    equipment_av = {}
+    for eq in db.query(models.Equipment).filter(models.Equipment.active == True).all():
+        equipment_av[eq.id] = _equipment_breakdown_in_range(eq.id, db, start=now, end=now)
+    return {"equipment": equipment_av, "now": now}
 
 
 @router.get("", response_model=List[schemas.OrderOut])

@@ -152,6 +152,8 @@ export const ordersAPI = {
   close: (id) => api.put(`/orders/${id}/close`),
   cancel: (id) => api.put(`/orders/${id}/cancel`),
   checkAvailability: (start, end) => api.get('/orders/availability/check', { params: { start, end } }),
+  // פירוט מלאי לזמן הנוכחי (לעמוד ניהול ציוד)
+  inventoryNow: () => api.get('/orders/inventory/now'),
 }
 
 // סטטוסים — מילון לתצוגה. צבעים: כחול=הוזמן, כתום=יצא, ירוק=חזר, אפור=סגור

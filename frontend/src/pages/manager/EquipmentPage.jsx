@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { equipmentAPI, exportsAPI, downloadBlob } from '../../api'
+import { equipmentAPI, exportsAPI, downloadBlob, ordersAPI } from '../../api'
 import Modal from '../../components/Modal'
 
 const DEFAULT_CATEGORIES = ['תאורה', 'סאונד', 'מצלמות', 'עדשות', 'חצובות', 'אביזרים', 'מוניטורים', 'וויירלס', 'מקליטים']
@@ -179,6 +179,7 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
 export default function EquipmentPage() {
   const [equipment, setEquipment] = useState([])
   const [categories, setCategories] = useState([])
+  const [inventory, setInventory] = useState({})  // {eq_id: {total, reserved, checked_out, available}}
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [tagSearch, setTagSearch] = useState('')
@@ -250,12 +251,14 @@ export default function EquipmentPage() {
 
   const load = async () => {
     try {
-      const [eqRes, catRes] = await Promise.all([
+      const [eqRes, catRes, invRes] = await Promise.all([
         equipmentAPI.getAll({ search: search || undefined, category: category || undefined }),
-        equipmentAPI.getCategories()
+        equipmentAPI.getCategories(),
+        ordersAPI.inventoryNow().catch(() => ({ data: { equipment: {} } })),
       ])
       setEquipment(eqRes.data)
       setCategories(catRes.data)
+      setInventory(invRes.data.equipment || {})
     } catch (e) {
       console.error(e)
     } finally {
@@ -446,13 +449,23 @@ export default function EquipmentPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  {['שם', 'קטגוריה', 'כמות', 'מחיר', 'יצרן', 'מיקום', 'ביטוח', 'פעולות'].map(h => (
-                    <th key={h} className="text-right text-xs font-semibold text-slate-500 px-4 py-3">{h}</th>
-                  ))}
+                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שם</th>
+                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">קטגוריה</th>
+                  <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">סה״כ</th>
+                  <th className="text-center text-xs font-semibold bg-sky-50 text-sky-700 px-2 py-3" title="הזמנות בסטטוס הוזמן/מוכן בתאריך הנוכחי">שמורים</th>
+                  <th className="text-center text-xs font-semibold bg-orange-50 text-orange-700 px-2 py-3" title="הזמנות שהציוד יצא בהן (פיזית בחוץ)">בחוץ</th>
+                  <th className="text-center text-xs font-semibold bg-emerald-50 text-emerald-700 px-2 py-3" title="זמין עכשיו להזמנה חדשה">זמין</th>
+                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פרטים</th>
+                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פעולות</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {equipment.map(item => (
+                {equipment.map(item => {
+                  const inv = inventory[item.id]
+                  const reserved = inv?.reserved ?? 0
+                  const checkedOut = inv?.checked_out ?? 0
+                  const available = inv?.available ?? item.quantity
+                  return (
                   <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -469,8 +482,10 @@ export default function EquipmentPage() {
                           </div>
                         )}
                         <div>
-                          <p className="font-medium text-slate-800 text-sm">{item.name}</p>
-                          {item.notes && <p className="text-xs text-slate-400">{item.notes}</p>}
+                          <p className="font-medium text-slate-800 text-sm">
+                            {item.is_key_product && <span title="מוצר מפתח" className="mr-1">🔑</span>}
+                            {item.name}
+                          </p>
                           {item.tag_id && <p className="text-[10px] text-slate-400 font-mono">#{item.tag_id}</p>}
                         </div>
                       </div>
@@ -478,16 +493,23 @@ export default function EquipmentPage() {
                     <td className="px-4 py-3">
                       <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-medium">{item.category}</span>
                     </td>
-                    <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.quantity}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {item.price > 0 ? `₪${item.price.toLocaleString()}` : '-'}
+                    <td className="px-2 py-3 text-center text-sm font-bold text-slate-700">{item.quantity}</td>
+                    <td className="px-2 py-3 text-center">
+                      <span className={`text-sm font-bold ${reserved > 0 ? 'text-sky-700' : 'text-slate-300'}`}>{reserved}</span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{item.manufacturer || '-'}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{item.location || '-'}</td>
-                    <td className="px-4 py-3">
-                      {item.insured
-                        ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-lg">✓ מבוטח</span>
-                        : <span className="text-xs text-slate-400">-</span>}
+                    <td className="px-2 py-3 text-center">
+                      <span className={`text-sm font-bold ${checkedOut > 0 ? 'text-orange-700' : 'text-slate-300'}`}>{checkedOut}</span>
+                    </td>
+                    <td className="px-2 py-3 text-center">
+                      <span className={`text-sm font-bold ${
+                        available === 0 ? 'text-rose-700 bg-rose-50 px-2 py-0.5 rounded' :
+                        available < item.quantity ? 'text-emerald-700' : 'text-slate-700'
+                      }`}>{available}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {item.manufacturer && <div>{item.manufacturer}</div>}
+                      {item.location && <div className="text-slate-400">📍 {item.location}</div>}
+                      {item.insured && <div className="text-green-600">✓ מבוטח</div>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
@@ -502,7 +524,8 @@ export default function EquipmentPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
