@@ -45,10 +45,12 @@ function QtyInput({ value, max, onChange, disabled, accent = 'requested', allowE
 
   const isEmpty = local === '' || local === null || local === undefined
   const colors = {
-    requested: local > 0 ? 'bg-sky-50 border-sky-300 text-sky-700'           : 'bg-white border-slate-200 text-slate-400',
-    issued:    local > 0 ? 'bg-orange-50 border-orange-300 text-orange-700'  : 'bg-white border-slate-200 text-slate-300',
-    returned:  local > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-700': 'bg-white border-slate-200 text-slate-300',
+    requested: local > 0 ? 'bg-sky-50 border-sky-300 text-sky-700' : 'bg-white border-slate-200 text-slate-400',
+    match:     'bg-emerald-100 border-emerald-500 text-emerald-800 font-extrabold',
     gap:       'bg-rose-100 border-rose-500 text-rose-800 ring-2 ring-rose-300 font-extrabold',
+    empty:     'bg-white border-slate-200 text-slate-300',
+    issued:    local > 0 ? 'bg-orange-50 border-orange-300 text-orange-700' : 'bg-white border-slate-200 text-slate-300',
+    returned:  local > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-300',
   }
   return (
     <input
@@ -484,10 +486,24 @@ export default function OrderDetail() {
                 const av = availability.kits[k.id]?.available
                 return (
                   <tr key={k.id} className={`hover:bg-slate-50 ${existing ? 'bg-primary-50/30' : ''}`}>
-                    <td className="px-4 py-2.5 font-bold text-slate-800">🎒 {k.name}</td>
-                    <td className="px-4 py-2.5 text-slate-500">{k.category}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{av ?? '—'}</td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-2.5 font-bold text-slate-800 align-top">
+                      <div>🎒 {k.name}</div>
+                      {k.items && k.items.length > 0 && (
+                        <div className="mt-1.5 text-[10px] text-slate-500 font-normal leading-snug">
+                          <span className="font-bold text-slate-400">כולל: </span>
+                          {k.items.map((i, idx) => (
+                            <span key={i.id}>
+                              {i.equipment?.name}
+                              {i.quantity_needed > 1 && <span className="text-slate-400"> ×{i.quantity_needed}</span>}
+                              {idx < k.items.length - 1 && ', '}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-500 align-top">{k.category}</td>
+                    <td className="px-4 py-2.5 text-slate-600 align-top">{av ?? '—'}</td>
+                    <td className="px-4 py-2.5 align-top">
                       <QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('kit', k.id, v)} disabled={!editable} />
                     </td>
                   </tr>
@@ -528,11 +544,12 @@ export default function OrderDetail() {
                 const name = it.kit?.name || it.equipment?.name || 'פריט'
                 const cat = it.kit?.category || it.equipment?.category || '—'
                 const req = it.quantity || 0
-                const iss = it.quantity_issued
-                const ret = it.quantity_returned
-                const gapIssued = iss !== null && iss !== undefined && iss !== req
-                const gapReturned = ret !== null && ret !== undefined && iss !== null && iss !== undefined && ret !== iss
-                const hasGap = gapIssued || gapReturned
+                const issNum = it.quantity_issued ?? null
+                const retNum = it.quantity_returned ?? null
+                // accent: ריק→empty; שווה למצופה→match (ירוק); שונה→gap (אדום)
+                const issuedAccent = issNum === null ? 'empty' : (issNum === req ? 'match' : 'gap')
+                const returnedAccent = retNum === null ? 'empty' : (issNum !== null && retNum === issNum ? 'match' : 'gap')
+                const hasGap = issuedAccent === 'gap' || returnedAccent === 'gap'
                 return (
                   <tr key={it.id} className={hasGap ? 'bg-rose-50 border-l-4 border-rose-500' : ''}>
                     <td className="px-4 py-2.5 font-bold">
@@ -546,10 +563,10 @@ export default function OrderDetail() {
                         disabled={!editable} />
                     </td>
                     <td className="px-3 py-2.5 bg-orange-50/30">
-                      <QtyInput value={iss ?? null} allowEmpty accent={gapIssued ? 'gap' : 'issued'} disabled={true} />
+                      <QtyInput value={issNum} allowEmpty accent={issuedAccent} disabled={true} />
                     </td>
                     <td className="px-3 py-2.5 bg-emerald-50/30">
-                      <QtyInput value={ret ?? null} allowEmpty accent={gapReturned ? 'gap' : 'returned'} disabled={true} />
+                      <QtyInput value={retNum} allowEmpty accent={returnedAccent} disabled={true} />
                     </td>
                   </tr>
                 )

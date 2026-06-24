@@ -1,6 +1,28 @@
 import React, { useState, useEffect } from 'react'
-import { equipmentAPI, exportsAPI, downloadBlob, ordersAPI } from '../../api'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { equipmentAPI, exportsAPI, downloadBlob, ordersAPI, kitsAPI } from '../../api'
 import Modal from '../../components/Modal'
+
+/** טאבים לניווט בין ציוד לערכות (משותף לשני המסכים) */
+function InventoryTabs() {
+  const location = useLocation()
+  const isEquipment = location.pathname.startsWith('/manager/equipment')
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1 flex gap-1 max-w-sm">
+      <Link to="/manager/equipment"
+        className={`flex-1 py-2 px-4 rounded-xl text-sm font-bold text-center transition-all
+          ${isEquipment ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+        📦 ציוד
+      </Link>
+      <Link to="/manager/kits"
+        className={`flex-1 py-2 px-4 rounded-xl text-sm font-bold text-center transition-all
+          ${!isEquipment ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+        🎒 ערכות
+      </Link>
+    </div>
+  )
+}
+export { InventoryTabs }
 
 const DEFAULT_CATEGORIES = ['תאורה', 'סאונד', 'מצלמות', 'עדשות', 'חצובות', 'אביזרים', 'מוניטורים', 'וויירלס', 'מקליטים']
 
@@ -177,11 +199,15 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
 }
 
 export default function EquipmentPage() {
+  const navigate = useNavigate()
   const [equipment, setEquipment] = useState([])
   const [categories, setCategories] = useState([])
   const [inventory, setInventory] = useState({})  // {eq_id: {total, reserved, checked_out, available}}
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
+  const [selected, setSelected] = useState(new Set())
+  const [creatingKit, setCreatingKit] = useState(false)
+  const [kitForm, setKitForm] = useState({ name: '', category: '', description: '', items: [] })
   const [tagSearch, setTagSearch] = useState('')
   const [tagResult, setTagResult] = useState(null)
   const [tagError, setTagError] = useState('')
@@ -268,6 +294,39 @@ export default function EquipmentPage() {
 
   useEffect(() => { load() }, [search, category])
 
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const clearSelection = () => setSelected(new Set())
+  const openCreateKit = () => {
+    // הכנת ערכה מהפריטים שנבחרו
+    const items = Array.from(selected).map(id => ({ equipment_id: id, quantity_needed: 1 }))
+    setKitForm({ name: '', category: '', description: '', items })
+    setCreatingKit(true)
+  }
+  const submitNewKit = async () => {
+    if (!kitForm.name.trim() || !kitForm.category) { alert('שם וקטגוריה הם שדות חובה'); return }
+    try {
+      await kitsAPI.create({
+        name: kitForm.name.trim(),
+        category: kitForm.category,
+        description: kitForm.description || null,
+        items: kitForm.items,
+        min_year: 1, max_year: 4,
+      })
+      clearSelection()
+      setCreatingKit(false)
+      alert(`הערכה "${kitForm.name}" נוצרה בהצלחה!`)
+      navigate('/manager/kits')
+    } catch (e) {
+      alert(e.response?.data?.detail || 'שגיאה ביצירת הערכה')
+    }
+  }
+
   const handleSubmit = async (form) => {
     setSubmitting(true)
     setError('')
@@ -300,6 +359,7 @@ export default function EquipmentPage() {
 
   return (
     <div className="space-y-6" dir="rtl">
+      <InventoryTabs />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">ניהול ציוד</h1>
@@ -333,18 +393,35 @@ export default function EquipmentPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-wrap gap-3">
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
         <input
-          placeholder="חיפוש לפי שם..."
+          placeholder="חיפוש לפי שם / יצרן / תג..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="border border-slate-200 rounded-xl px-4 py-2 text-sm flex-1 min-w-48 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          className="border border-slate-200 rounded-xl px-4 py-2 text-sm w-full focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
         />
-        <select value={category} onChange={e => setCategory(e.target.value)}
-          className="border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-primary-500">
-          <option value="">כל הקטגוריות</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setCategory('')}
+            className={`text-xs px-3 py-2 rounded-xl font-medium transition-all
+              ${!category ? 'bg-primary-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+          >
+            הכל ({equipment.length})
+          </button>
+          {categories.map(c => {
+            const count = equipment.filter(e => e.category === c).length
+            return (
+              <button
+                key={c}
+                onClick={() => setCategory(c)}
+                className={`text-xs px-3 py-2 rounded-xl font-medium transition-all
+                  ${category === c ? 'bg-primary-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+              >
+                {c} ({count})
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Tag / Barcode lookup */}
@@ -439,6 +516,23 @@ export default function EquipmentPage() {
       )}
 
       {/* Desktop table (visible only md and up) */}
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="bg-primary-50 border-2 border-primary-300 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 sticky top-2 z-10 shadow-md">
+          <div className="text-sm font-bold text-primary-800">{selected.size} פריטים נבחרו</div>
+          <div className="flex gap-2">
+            <button onClick={openCreateKit}
+              className="bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold px-4 py-2 rounded-xl">
+              🎒 צור ערכה מהבחירה
+            </button>
+            <button onClick={clearSelection}
+              className="bg-white border border-slate-200 text-slate-700 text-sm font-bold px-4 py-2 rounded-xl">
+              נקה
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hidden md:block">
         {loading ? (
           <div className="flex items-center justify-center h-32"><div className="spinner" /></div>
@@ -449,6 +543,12 @@ export default function EquipmentPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-3 py-3 w-10">
+                    <input type="checkbox"
+                      checked={selected.size === equipment.length && equipment.length > 0}
+                      onChange={() => selected.size === equipment.length ? clearSelection() : setSelected(new Set(equipment.map(e => e.id)))}
+                      className="w-4 h-4" />
+                  </th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שם</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">קטגוריה</th>
                   <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">סה״כ</th>
@@ -465,8 +565,12 @@ export default function EquipmentPage() {
                   const reserved = inv?.reserved ?? 0
                   const checkedOut = inv?.checked_out ?? 0
                   const available = inv?.available ?? item.quantity
+                  const checked = selected.has(item.id)
                   return (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${checked ? 'bg-primary-50/30' : ''}`}>
+                    <td className="px-3 py-3">
+                      <input type="checkbox" checked={checked} onChange={() => toggleSelect(item.id)} className="w-4 h-4" />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {item.image_url ? (
@@ -549,6 +653,67 @@ export default function EquipmentPage() {
           loading={submitting}
           existingCategories={categories}
         />
+      </Modal>
+
+      {/* Create Kit from selection */}
+      <Modal isOpen={creatingKit} onClose={() => setCreatingKit(false)}
+        title={`צור ערכה מ-${selected.size} פריטים שנבחרו`} size="lg">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">שם הערכה *</label>
+            <input value={kitForm.name} onChange={e => setKitForm(f => ({ ...f, name: e.target.value }))}
+              placeholder='למשל: "ערכת צילום בסיסית"'
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">קטגוריה *</label>
+            <select value={kitForm.category} onChange={e => setKitForm(f => ({ ...f, category: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
+              <option value="">בחר קטגוריה</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">תיאור</label>
+            <textarea rows={2} value={kitForm.description} onChange={e => setKitForm(f => ({ ...f, description: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm resize-none" />
+          </div>
+          <div className="bg-slate-50 rounded-xl p-4">
+            <p className="text-sm font-bold text-slate-700 mb-2">פריטים בערכה ({kitForm.items.length}):</p>
+            <ul className="space-y-1.5">
+              {kitForm.items.map((it, idx) => {
+                const eq = equipment.find(e => e.id === it.equipment_id)
+                return (
+                  <li key={it.equipment_id} className="text-sm flex items-center gap-2">
+                    <span className="text-slate-700">{eq?.name || `#${it.equipment_id}`}</span>
+                    <input type="number" min={1} value={it.quantity_needed}
+                      onChange={e => {
+                        const n = Math.max(1, parseInt(e.target.value) || 1)
+                        setKitForm(f => {
+                          const items = [...f.items]
+                          items[idx] = { ...items[idx], quantity_needed: n }
+                          return { ...f, items }
+                        })
+                      }}
+                      className="w-16 border border-slate-200 rounded px-2 py-1 text-sm text-center" />
+                    <button onClick={() => setKitForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))}
+                      className="text-red-400 hover:text-red-600 mr-auto">✕</button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={submitNewKit}
+              className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-bold py-2.5 rounded-xl">
+              🎒 צור ערכה
+            </button>
+            <button onClick={() => setCreatingKit(false)}
+              className="flex-1 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl">
+              ביטול
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* Import Modal */}

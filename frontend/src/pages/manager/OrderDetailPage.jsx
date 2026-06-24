@@ -44,11 +44,15 @@ function QtyInput({ value, max, onChange, disabled, accent = 'requested', allowE
   // צבע ברקע — מבוסס accent
   const isEmpty = local === '' || local === null || local === undefined
   const isZero = local === 0
+  // accent חדש: match=ירוק (התאמה), gap=אדום (אי-התאמה), empty=לבן (ריק)
   const colors = {
-    requested: local > 0 ? 'bg-sky-50 border-sky-300 text-sky-700'           : 'bg-white border-slate-200 text-slate-400',
-    issued:    local > 0 ? 'bg-orange-50 border-orange-300 text-orange-700'  : (isEmpty ? 'bg-white border-slate-200 text-slate-300' : 'bg-white border-slate-200 text-slate-400'),
-    returned:  local > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-700': (isEmpty ? 'bg-white border-slate-200 text-slate-300' : 'bg-white border-slate-200 text-slate-400'),
+    requested: local > 0 ? 'bg-sky-50 border-sky-300 text-sky-700' : 'bg-white border-slate-200 text-slate-400',
+    match:     'bg-emerald-100 border-emerald-500 text-emerald-800 font-extrabold',
     gap:       'bg-rose-100 border-rose-500 text-rose-800 ring-2 ring-rose-300 font-extrabold',
+    empty:     'bg-white border-slate-200 text-slate-300',
+    // legacy
+    issued:    local > 0 ? 'bg-orange-50 border-orange-300 text-orange-700' : 'bg-white border-slate-200 text-slate-300',
+    returned:  local > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-300',
   }
   return (
     <input
@@ -506,22 +510,22 @@ export default function OrderDetailPage() {
                   const name = it.kit?.name || it.equipment?.name || 'פריט'
                   const cat = it.kit?.category || it.equipment?.category || '—'
                   const req = it.quantity || 0
-                  // null = "טרם נקבע"; 0 = "סומן במפורש"
                   const iss = it.quantity_issued
                   const ret = it.quantity_returned
                   const issNum = iss ?? null
                   const retNum = ret ?? null
-                  // פערים: יצא מוגדר ושונה מהוזמן; חזר מוגדר ושונה מהיצא
-                  const gapIssued = issNum !== null && issNum !== req
-                  const gapReturned = retNum !== null && issNum !== null && retNum !== issNum
-                  const hasAnyGap = gapIssued || gapReturned
+                  // accent ל-issued: ריק → empty; שווה הוזמן → match (ירוק); שונה → gap (אדום)
+                  const issuedAccent = issNum === null ? 'empty' : (issNum === req ? 'match' : 'gap')
+                  // accent ל-returned: ריק → empty; שווה יצא → match (ירוק); שונה → gap (אדום)
+                  const returnedAccent = retNum === null ? 'empty' : (issNum !== null && retNum === issNum ? 'match' : 'gap')
+                  const hasAnyGap = issuedAccent === 'gap' || returnedAccent === 'gap'
                   return (
                     <tr key={it.id} className={hasAnyGap ? 'bg-rose-50 border-l-4 border-rose-500' : ''}>
                       <td className="px-4 py-2.5 font-bold">
                         {hasAnyGap && <span className="text-rose-600 font-extrabold mr-1">⚠</span>}
                         {isKit ? '🎒' : '📦'} {name}
-                        {gapIssued && <span className="text-[10px] text-rose-600 mr-2 font-bold">פער יצא</span>}
-                        {gapReturned && <span className="text-[10px] text-rose-600 mr-2 font-bold">פער חזרה</span>}
+                        {issuedAccent === 'gap' && <span className="text-[10px] text-rose-600 mr-2 font-bold">פער יצא</span>}
+                        {returnedAccent === 'gap' && <span className="text-[10px] text-rose-600 mr-2 font-bold">פער חזרה</span>}
                       </td>
                       <td className="px-4 py-2.5 text-slate-500">{cat}</td>
                       <td className="px-3 py-2.5 bg-sky-50/30">
@@ -530,12 +534,12 @@ export default function OrderDetailPage() {
                           disabled={!editable} />
                       </td>
                       <td className="px-3 py-2.5 bg-orange-50/30">
-                        <QtyInput value={issNum} allowEmpty accent={gapIssued ? 'gap' : 'issued'}
+                        <QtyInput value={issNum} allowEmpty accent={issuedAccent}
                           onChange={v => setItemIssued(it.id, v)}
                           disabled={!editable || !(['pending','ready','checked_out'].includes(order.status))} />
                       </td>
                       <td className="px-3 py-2.5 bg-emerald-50/30">
-                        <QtyInput value={retNum} allowEmpty accent={gapReturned ? 'gap' : 'returned'}
+                        <QtyInput value={retNum} allowEmpty accent={returnedAccent}
                           onChange={v => setItemReturned(it.id, v)}
                           disabled={!editable || order.status !== 'checked_out'} />
                       </td>
@@ -563,10 +567,24 @@ export default function OrderDetailPage() {
                   const av = availability.kits[k.id]?.available
                   return (
                     <tr key={k.id} className={existing ? 'bg-primary-50/30' : ''}>
-                      <td className="px-4 py-2.5 font-bold">🎒 {k.name}</td>
-                      <td className="px-4 py-2.5 text-slate-500">{k.category}</td>
-                      <td className="px-4 py-2.5 text-slate-600">{av ?? '—'}</td>
-                      <td className="px-4 py-2.5"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('kit', k.id, v)} disabled={!editable} /></td>
+                      <td className="px-4 py-2.5 font-bold align-top">
+                        <div>🎒 {k.name}</div>
+                        {k.items && k.items.length > 0 && (
+                          <div className="mt-1.5 text-[10px] text-slate-500 font-normal leading-snug">
+                            <span className="font-bold text-slate-400">כולל: </span>
+                            {k.items.map((i, idx) => (
+                              <span key={i.id}>
+                                {i.equipment?.name}
+                                {i.quantity_needed > 1 && <span className="text-slate-400"> ×{i.quantity_needed}</span>}
+                                {idx < k.items.length - 1 && ', '}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-500 align-top">{k.category}</td>
+                      <td className="px-4 py-2.5 text-slate-600 align-top">{av ?? '—'}</td>
+                      <td className="px-4 py-2.5 align-top"><QtyInput value={existing?.quantity || 0} max={av} onChange={v => setItemQty('kit', k.id, v)} disabled={!editable} /></td>
                     </tr>
                   )
                 })}

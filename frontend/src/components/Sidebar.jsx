@@ -9,9 +9,8 @@ const managerNav = [
   { to: '/manager/orders', label: 'הזמנות', icon: '📋' },
   // תפריט "ניהול" — נפתח/נסגר; כולל כל מה שמאחורי הקלעים
   { group: 'ניהול', icon: '⚙️', children: [
-    { to: '/manager/equipment', label: 'ציוד',       icon: '📦' },
-    { to: '/manager/kits',      label: 'ערכות',      icon: '🎒' },
-    { to: '/manager/students',  label: 'משתמשים',    icon: '👥' },
+    { to: '/manager/equipment', label: 'ציוד וערכות', icon: '📦' },
+    { to: '/manager/students',  label: 'משתמשים',     icon: '👥' },
   ]},
 ]
 

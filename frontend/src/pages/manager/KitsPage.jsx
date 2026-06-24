@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { kitsAPI, equipmentAPI } from '../../api'
 import Modal from '../../components/Modal'
+import { InventoryTabs } from './EquipmentPage'
 
 // Searchable equipment combobox
 function EquipmentPicker({ value, onChange, allEquipment }) {
@@ -299,6 +300,7 @@ export default function KitsPage() {
 
   return (
     <div className="space-y-6" dir="rtl">
+      <InventoryTabs />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">ניהול ערכות</h1>
