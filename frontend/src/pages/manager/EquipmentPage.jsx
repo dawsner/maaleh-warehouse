@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { equipmentAPI, exportsAPI, downloadBlob, ordersAPI, kitsAPI } from '../../api'
 import Modal from '../../components/Modal'
@@ -203,6 +203,7 @@ export default function EquipmentPage() {
   const [equipment, setEquipment] = useState([])
   const [categories, setCategories] = useState([])
   const [inventory, setInventory] = useState({})  // {eq_id: {total, reserved, checked_out, available}}
+  const [kits, setKits] = useState([])            // כל הערכות — לצורך "בערכות"
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [selected, setSelected] = useState(new Set())
@@ -277,20 +278,34 @@ export default function EquipmentPage() {
 
   const load = async () => {
     try {
-      const [eqRes, catRes, invRes] = await Promise.all([
+      const [eqRes, catRes, invRes, kitsRes] = await Promise.all([
         equipmentAPI.getAll({ search: search || undefined, category: category || undefined }),
         equipmentAPI.getCategories(),
         ordersAPI.inventoryNow().catch(() => ({ data: { equipment: {} } })),
+        kitsAPI.getAll().catch(() => ({ data: [] })),
       ])
       setEquipment(eqRes.data)
       setCategories(catRes.data)
       setInventory(invRes.data.equipment || {})
+      setKits(kitsRes.data)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
   }
+
+  // מיפוי: לאילו ערכות שייך כל פריט
+  const kitsByEquipment = useMemo(() => {
+    const m = {}
+    kits.forEach(k => {
+      (k.items || []).forEach(i => {
+        if (!m[i.equipment_id]) m[i.equipment_id] = []
+        m[i.equipment_id].push({ id: k.id, name: k.name })
+      })
+    })
+    return m
+  }, [kits])
 
   useEffect(() => { load() }, [search, category])
 
@@ -552,9 +567,9 @@ export default function EquipmentPage() {
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שם</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">קטגוריה</th>
                   <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">סה״כ</th>
-                  <th className="text-center text-xs font-semibold bg-sky-50 text-sky-700 px-2 py-3" title="הזמנות בסטטוס הוזמן/מוכן בתאריך הנוכחי">שמורים</th>
-                  <th className="text-center text-xs font-semibold bg-orange-50 text-orange-700 px-2 py-3" title="הזמנות שהציוד יצא בהן (פיזית בחוץ)">בחוץ</th>
-                  <th className="text-center text-xs font-semibold bg-emerald-50 text-emerald-700 px-2 py-3" title="זמין עכשיו להזמנה חדשה">זמין</th>
+                  <th className="text-center text-xs font-semibold bg-orange-50 text-orange-700 px-2 py-3" title="פיזית בחוץ עכשיו">בחוץ עכשיו</th>
+                  <th className="text-center text-xs font-semibold bg-emerald-50 text-emerald-700 px-2 py-3" title="פיזית במחסן עכשיו">במחסן</th>
+                  <th className="text-right text-xs font-semibold bg-purple-50 text-purple-700 px-4 py-3" title="באילו ערכות נמצא הפריט">בערכות</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פרטים</th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פעולות</th>
                 </tr>
@@ -562,10 +577,10 @@ export default function EquipmentPage() {
               <tbody className="divide-y divide-slate-50">
                 {equipment.map(item => {
                   const inv = inventory[item.id]
-                  const reserved = inv?.reserved ?? 0
                   const checkedOut = inv?.checked_out ?? 0
-                  const available = inv?.available ?? item.quantity
+                  const inStore = (item.quantity || 0) - checkedOut  // כמה פיזית במחסן עכשיו
                   const checked = selected.has(item.id)
+                  const itemKits = kitsByEquipment[item.id] || []
                   return (
                   <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${checked ? 'bg-primary-50/30' : ''}`}>
                     <td className="px-3 py-3">
@@ -599,16 +614,26 @@ export default function EquipmentPage() {
                     </td>
                     <td className="px-2 py-3 text-center text-sm font-bold text-slate-700">{item.quantity}</td>
                     <td className="px-2 py-3 text-center">
-                      <span className={`text-sm font-bold ${reserved > 0 ? 'text-sky-700' : 'text-slate-300'}`}>{reserved}</span>
-                    </td>
-                    <td className="px-2 py-3 text-center">
                       <span className={`text-sm font-bold ${checkedOut > 0 ? 'text-orange-700' : 'text-slate-300'}`}>{checkedOut}</span>
                     </td>
                     <td className="px-2 py-3 text-center">
                       <span className={`text-sm font-bold ${
-                        available === 0 ? 'text-rose-700 bg-rose-50 px-2 py-0.5 rounded' :
-                        available < item.quantity ? 'text-emerald-700' : 'text-slate-700'
-                      }`}>{available}</span>
+                        inStore === 0 ? 'text-rose-700 bg-rose-50 px-2 py-0.5 rounded' :
+                        inStore < item.quantity ? 'text-emerald-700' : 'text-slate-700'
+                      }`}>{inStore}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {itemKits.length === 0 ? (
+                        <span className="text-slate-300">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {itemKits.map(k => (
+                            <span key={k.id} className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold">
+                              🎒 {k.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {item.manufacturer && <div>{item.manufacturer}</div>}
