@@ -34,7 +34,7 @@ const CATEGORY_ICON = {
 }
 const iconForCategory = (cat) => CATEGORY_ICON[cat] || '📦'
 
-const YEAR_OPTIONS = [1, 2, 3, 4]
+const YEAR_OPTIONS = [1, 2, 3, 4, 5]
 
 function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories = [] }) {
   const [form, setForm] = useState({
@@ -153,19 +153,42 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
           <textarea rows={2} value={form.notes || ''} onChange={e => set('notes', e.target.value)}
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 resize-none" />
         </div>
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1">משנה</label>
-          <select value={form.min_year} onChange={e => set('min_year', parseInt(e.target.value))}
-            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
-            {YEAR_OPTIONS.map(y => <option key={y} value={y}>שנה {y}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1">עד שנה</label>
-          <select value={form.max_year} onChange={e => set('max_year', parseInt(e.target.value))}
-            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
-            {YEAR_OPTIONS.filter(y => y >= form.min_year).map(y => <option key={y} value={y}>שנה {y}</option>)}
-          </select>
+        <div className="col-span-2">
+          <label className="block text-sm font-semibold text-slate-700 mb-2">מי רשאי להוציא? (סמן שנים ספציפיות)</label>
+          <div className="flex gap-2 flex-wrap">
+            {YEAR_OPTIONS.map(y => {
+              const currentYears = (form.allowed_years || '').split(',').filter(Boolean).map(Number)
+              const isChecked = currentYears.length === 0
+                ? (y >= (form.min_year || 1) && y <= (form.max_year || 4))
+                : currentYears.includes(y)
+              return (
+                <label key={y} className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 cursor-pointer transition-all
+                  ${isChecked ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                  <input type="checkbox" checked={isChecked}
+                    onChange={e => {
+                      const cur = new Set((form.allowed_years || '').split(',').filter(Boolean).map(Number))
+                      // מיוזר של min_year/max_year אם ריק
+                      if (!form.allowed_years) {
+                        for (let year = (form.min_year || 1); year <= (form.max_year || 4); year++) cur.add(year)
+                      }
+                      if (e.target.checked) cur.add(y); else cur.delete(y)
+                      set('allowed_years', Array.from(cur).sort().join(','))
+                      // גם מעדכן min/max כברירת מחדל לתאימות אחורה
+                      if (cur.size > 0) {
+                        const yrs = Array.from(cur).sort((a, b) => a - b)
+                        set('min_year', yrs[0])
+                        set('max_year', yrs[yrs.length - 1])
+                      }
+                    }}
+                    className="w-4 h-4" />
+                  <span className="text-sm font-bold">שנה {y}</span>
+                </label>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-2">
+            תוכל לבחור שנים לא רציפות — למשל שנה א׳ + ג׳ בלי ב׳
+          </p>
         </div>
         <div className="col-span-2 grid grid-cols-2 gap-3">
           <label className="flex items-center gap-3 cursor-pointer bg-slate-50 rounded-xl p-3">

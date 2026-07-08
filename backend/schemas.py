@@ -79,6 +79,7 @@ class EquipmentBase(BaseModel):
     notes: Optional[str] = None
     min_year: int = 1
     max_year: int = 4
+    allowed_years: Optional[str] = None  # "1,3,5" — רשימת שנים; ריק = min..max
     is_key_product: bool = False
 
 
@@ -102,6 +103,7 @@ class EquipmentUpdate(BaseModel):
     notes: Optional[str] = None
     min_year: Optional[int] = None
     max_year: Optional[int] = None
+    allowed_years: Optional[str] = None
     is_key_product: Optional[bool] = None
     active: Optional[bool] = None
 

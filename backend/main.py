@@ -32,6 +32,9 @@ def _run_migrations():
             if 'is_key_product' not in cols:
                 conn.execute(text("ALTER TABLE equipment ADD COLUMN is_key_product BOOLEAN DEFAULT 0"))
                 print("[migration] Added equipment.is_key_product")
+            if 'allowed_years' not in cols:
+                conn.execute(text("ALTER TABLE equipment ADD COLUMN allowed_years VARCHAR"))
+                print("[migration] Added equipment.allowed_years")
 
     if 'users' in inspector.get_table_names():
         cols = {c['name'] for c in inspector.get_columns('users')}

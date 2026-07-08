@@ -172,6 +172,29 @@ def _orders_query(db: Session):
     )
 
 
+def _notify_late_change(db: Session, order: models.Order, changed_by: models.User, action_desc: str):
+    """שולח התראה למנהלי מחסן כשסטודנט/מרצה משנה הזמנה שכבר במצב מתקדם.
+    ready / checked_out — הציוד כבר מוקצה/יצא, שינוי מצריך שימת לב.
+    לא שולח שינויי מנהל עצמו."""
+    if order.status not in ("ready", "checked_out"):
+        return
+    if changed_by.role == "admin":
+        return
+    admins = db.query(models.User).filter(
+        models.User.role == "admin", models.User.active == True
+    ).all()
+    for admin in admins:
+        try:
+            notify(
+                db, user_id=admin.id, type_="order_late_change",
+                title=f"⚠️ שינוי בהזמנה #{order.id} (סטטוס: {order.status})",
+                body=f"{changed_by.name} {action_desc}",
+                link=f"/manager/orders/{order.id}",
+            )
+        except Exception as e:
+            print(f"[notify] warning: {e}")
+
+
 def _enrich(order: models.Order) -> schemas.OrderOut:
     """הוספת שדות מחושבים (item_count, returned_count, is_overdue, days_overdue)."""
     data = schemas.OrderOut.model_validate(order, from_attributes=True)
@@ -650,7 +673,44 @@ def add_item(
     kit, eq = _validate_item_payload(db, item)
     qty = max(1, int(item.quantity or 1))
 
-    # אם כבר קיים פריט זהה ב-active (לא הוחזר) — מגדיל כמות (לציוד בלבד)
+    # --- ערכה: הרחבה לפריטים בודדים (במקום שורת "ערכה" אחת) ---
+    # לפי בקשת לקוח — הזמנת ערכה פורשת אוטומטית את כל הפריטים בה כשורות נפרדות
+    if kit:
+        added_items = []
+        for kit_item in (kit.items or []):
+            if not kit_item.equipment_id:
+                continue
+            needed = (kit_item.quantity_needed or 1) * qty
+            # אם הציוד הזה כבר קיים בהזמנה — נגדיל כמות
+            existing = next(
+                (it for it in o.items
+                 if it.equipment_id == kit_item.equipment_id and it.returned_at is None),
+                None
+            )
+            if existing:
+                existing.quantity = (existing.quantity or 0) + needed
+            else:
+                db.add(models.OrderItem(
+                    order_id=o.id,
+                    equipment_id=kit_item.equipment_id,
+                    quantity=needed,
+                    added_by=current_user.id,
+                ))
+                added_items.append(kit_item.equipment.name if kit_item.equipment else "פריט")
+
+        o.last_modified_at = datetime.utcnow()
+        log_activity(
+            db, user_id=current_user.id, action="order.kit_expanded",
+            entity_type="order", entity_id=o.id,
+            description=f"{current_user.name} הוסיף ערכה '{kit.name}' (הורחבה ל-{len(kit.items or [])} פריטים)",
+        )
+        # התראה למחסן אם ההזמנה מעבר לpending (שינוי מאוחר)
+        _notify_late_change(db, o, current_user, f"הוסיף פריטי ערכה '{kit.name}'")
+        db.commit()
+        return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
+
+    # --- ציוד בודד ---
+    # אם כבר קיים פריט זהה ב-active (לא הוחזר) — מגדיל כמות
     if item.equipment_id is not None:
         existing = next(
             (it for it in o.items
@@ -665,24 +725,24 @@ def add_item(
                 entity_type="order", entity_id=o.id,
                 description=f"{current_user.name} הגדיל כמות של '{eq.name}' (+{qty})",
             )
+            _notify_late_change(db, o, current_user, f"עדכן כמות של '{eq.name}'")
             db.commit()
             return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
 
     oi = models.OrderItem(
         order_id=o.id,
-        kit_id=item.kit_id,
         equipment_id=item.equipment_id,
         quantity=qty,
         added_by=current_user.id,
     )
     db.add(oi)
     o.last_modified_at = datetime.utcnow()
-    label = kit.name if kit else (f"{eq.name}" + (f" x{qty}" if qty > 1 else ""))
     log_activity(
         db, user_id=current_user.id, action="order.item_added",
         entity_type="order", entity_id=o.id,
-        description=f"{current_user.name} הוסיף '{label}' להזמנה #{o.id}",
+        description=f"{current_user.name} הוסיף '{eq.name}' x{qty} להזמנה #{o.id}",
     )
+    _notify_late_change(db, o, current_user, f"הוסיף '{eq.name}'")
     db.commit()
     return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
 
@@ -724,7 +784,11 @@ def update_item(
         raise HTTPException(status_code=403, detail="לא ניתן לעריכה — ההזמנה סגורה")
 
     if payload.quantity is not None:
+        old_qty = it.quantity
         it.quantity = max(1, int(payload.quantity))
+        if old_qty != it.quantity:
+            _notify_late_change(db, o, current_user,
+                                f"שינה כמות של '{_item_label(it)}' מ-{old_qty} ל-{it.quantity}")
 
     # quantity_issued / quantity_returned — מנהל בלבד
     if current_user.role == "admin":
@@ -772,6 +836,7 @@ def remove_item(
         entity_type="order", entity_id=o.id,
         description=f"{current_user.name} הסיר '{label}' מההזמנה #{o.id}",
     )
+    _notify_late_change(db, o, current_user, f"הסיר '{label}' מההזמנה")
     db.commit()
     return _enrich(_orders_query(db).filter(models.Order.id == order_id).first())
 

@@ -42,9 +42,11 @@ class Equipment(Base):
     tag_id = Column(String, nullable=True)
     image_url = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
-    # שיוך לשנה (כמו ערכה) — סטודנט בשנה X יראה רק פריטים שמתאימים לטווח
+    # שיוך לשנה (טווח — legacy) — משמש כברירת מחדל אם allowed_years ריק
     min_year = Column(Integer, default=1)
     max_year = Column(Integer, default=4)
+    # רשימת שנים מותרות ("1,3" = שנה א׳+ג׳; ריק = לפי min_year/max_year)
+    allowed_years = Column(String, nullable=True)
     # "מוצר מפתח" — הגבלת מלאי קשיחה (מצלמה/זום). שאר הציוד (שקי חול) — אין הגבלה
     is_key_product = Column(Boolean, default=False)
     active = Column(Boolean, default=True)
