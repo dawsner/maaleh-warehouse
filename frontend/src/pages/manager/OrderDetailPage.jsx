@@ -14,9 +14,8 @@ const toLocalInput = (iso) => {
 
 const EDITABLE = new Set(['draft', 'pending', 'ready', 'checked_out', 'returned'])
 const TABS = [
-  { key: 'kits',      label: '🎒 ערכות' },
-  { key: 'equipment', label: '📦 ציוד' },
-  { key: 'order',     label: '📋 בהזמנה' },
+  { key: 'catalog', label: '🎒📦 קטלוג' },
+  { key: 'order',   label: '📋 בהזמנה' },
 ]
 
 /** Input של כמות עם debounce. accent קובע צבע + תצוגה. allowEmpty=true → null מציג "—". */
@@ -382,16 +381,16 @@ export default function OrderDetailPage() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      {/* Header — sticky כדי שהכפתורים נגישים גם בגלילה */}
+      <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur -mx-4 px-4 pt-3 pb-3 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
         <div>
           <Link to="/manager/orders" className="text-sm text-slate-500 hover:text-slate-700">‹ חזרה להזמנות</Link>
-          <h1 className="text-2xl font-extrabold text-slate-800 mt-1 flex items-center gap-2 flex-wrap">
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 mt-1 flex items-center gap-2 flex-wrap">
             הזמנה #{order.id}
             <span className={`text-xs font-bold px-2 py-1 rounded-lg ${statusMeta.color}`}>{statusMeta.label}</span>
             {order.is_overdue && <span className="text-[11px] bg-rose-100 text-rose-700 px-2 py-1 rounded font-bold">⚠️ באיחור {order.days_overdue} ימים</span>}
           </h1>
-          <p className="text-sm text-slate-600 mt-1">{order.student?.name} · {order.student?.email}</p>
-          <p className="text-xs text-slate-400 mt-1">עודכן {fmtDate(order.last_modified_at)}</p>
+          <p className="text-sm text-slate-600 mt-0.5">{order.student?.name}</p>
         </div>
 
         <div className="flex gap-2 flex-wrap">
@@ -562,7 +561,7 @@ export default function OrderDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {tab === 'kits' && filteredKits.map(k => {
+                {tab === 'catalog' && filteredKits.map(k => {
                   const existing = itemsByKit[k.id]
                   const av = availability.kits[k.id]?.available
                   return (
@@ -588,7 +587,7 @@ export default function OrderDetailPage() {
                     </tr>
                   )
                 })}
-                {tab === 'equipment' && filteredEq.map(e => {
+                {tab === 'catalog' && filteredEq.map(e => {
                   const existing = itemsByEquipment[e.id]
                   const inv = availability.equipment[e.id] || {}
                   const av = inv.available ?? e.quantity

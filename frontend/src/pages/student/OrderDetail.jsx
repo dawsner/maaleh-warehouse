@@ -16,9 +16,8 @@ const toLocalInput = (iso) => {
 
 const EDITABLE = new Set(['draft', 'pending', 'ready', 'checked_out', 'returned'])
 const TABS = [
-  { key: 'kits',      label: '🎒 ערכות' },
-  { key: 'equipment', label: '📦 ציוד' },
-  { key: 'order',     label: '📋 בהזמנה' },
+  { key: 'catalog', label: '🎒📦 קטלוג — ערכות וציוד' },
+  { key: 'order',   label: '📋 בהזמנה' },
 ]
 
 /**
@@ -119,6 +118,7 @@ export default function OrderDetail() {
   const [error, setError] = useState('')
   const [savingDetails, setSavingDetails] = useState(false)
   const [tab, setTab] = useState('order')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [search, setSearch] = useState('')
   const [allKits, setAllKits] = useState([])
   const [allEquipment, setAllEquipment] = useState([])
@@ -198,21 +198,35 @@ export default function OrderDetail() {
   }, [order])
 
   const filteredKits = useMemo(() => {
-    if (!search) return allKits
+    let list = allKits
+    if (categoryFilter) list = list.filter(k => k.category === categoryFilter)
+    if (!search) return list
     const q = search.toLowerCase()
-    return allKits.filter(k => k.name.toLowerCase().includes(q) || (k.category||'').toLowerCase().includes(q))
-  }, [allKits, search])
+    return list.filter(k => k.name.toLowerCase().includes(q) || (k.category||'').toLowerCase().includes(q))
+  }, [allKits, search, categoryFilter])
 
   const filteredEq = useMemo(() => {
-    if (!search) return allEquipment
+    let list = allEquipment
+    if (categoryFilter) list = list.filter(e => e.category === categoryFilter)
+    if (!search) return list
     const q = search.toLowerCase()
-    return allEquipment.filter(e =>
+    return list.filter(e =>
       e.name.toLowerCase().includes(q) ||
       (e.category||'').toLowerCase().includes(q) ||
       (e.manufacturer||'').toLowerCase().includes(q) ||
       (e.tag_id||'').toLowerCase().includes(q)
     )
-  }, [allEquipment, search])
+  }, [allEquipment, search, categoryFilter])
+
+  // רשימת כל הקטגוריות (משתי הרשימות) — לסינון
+  const allCategories = useMemo(() => {
+    const set = new Set()
+    ;[...allKits, ...allEquipment].forEach(x => x.category && set.add(x.category))
+    return Array.from(set).sort()
+  }, [allKits, allEquipment])
+
+  // האם יש תאריכים תקינים?
+  const hasDates = !!(draft.loan_date && draft.due_date)
 
   const saveDetails = async () => {
     setSavingDetails(true)
@@ -272,11 +286,11 @@ export default function OrderDetail() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      {/* Header — sticky כדי שכפתורי הפעולה תמיד נגישים */}
+      <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur -mx-4 px-4 pt-3 pb-3 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
         <div>
           <Link to="/student/orders" className="text-sm text-slate-500 hover:text-slate-700">‹ חזרה להזמנות</Link>
-          <h1 className="text-2xl font-extrabold text-slate-800 mt-1 flex items-center gap-2 flex-wrap">
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 mt-1 flex items-center gap-2 flex-wrap">
             הזמנה #{order.id}
             <span className={`text-xs font-bold px-2 py-1 rounded-lg ${statusMeta.color}`}>{statusMeta.label}</span>
             {order.is_overdue && (
@@ -285,7 +299,6 @@ export default function OrderDetail() {
               </span>
             )}
           </h1>
-          <p className="text-xs text-slate-500 mt-1">עודכן {fmtDate(order.last_modified_at)}</p>
         </div>
         {order.status === 'pending' && (
           <button onClick={handleCancel} className="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-bold px-4 py-2 rounded-xl">
@@ -450,7 +463,14 @@ export default function OrderDetail() {
           ))}
         </div>
 
-        <div className="px-5 py-3">
+        {tab === 'catalog' && !hasDates && (
+          <div className="mx-5 my-4 bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-center">
+            <p className="font-bold text-amber-900 mb-1">⚠️ יש לקבוע קודם תאריכי מ- ועד-</p>
+            <p className="text-xs text-amber-700">חובה למלא את התאריכים למעלה לפני שאפשר לבחור ציוד. אחרת אי אפשר לחשב זמינות.</p>
+          </div>
+        )}
+
+        <div className="px-5 py-3 space-y-3">
           <input
             type="text"
             value={search}
@@ -458,11 +478,27 @@ export default function OrderDetail() {
             placeholder="חיפוש לפי שם, יצרן, קטגוריה..."
             className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
           />
+          {tab === 'catalog' && allCategories.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap">
+              <button onClick={() => setCategoryFilter('')}
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium
+                  ${!categoryFilter ? 'bg-primary-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
+                כל הקטגוריות
+              </button>
+              {allCategories.map(c => (
+                <button key={c} onClick={() => setCategoryFilter(c)}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium
+                    ${categoryFilter === c ? 'bg-primary-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-xs text-slate-500">
+            <thead className="bg-slate-50 text-xs text-slate-500 sticky top-0 z-10">
               {tab === 'order' ? (
                 <tr>
                   <th className="text-right px-4 py-2 font-semibold">פריט</th>
@@ -481,7 +517,7 @@ export default function OrderDetail() {
               )}
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {tab === 'kits' && filteredKits.map(k => {
+              {tab === 'catalog' && hasDates && filteredKits.map(k => {
                 const existing = itemsByKit[k.id]
                 const av = availability.kits[k.id]?.available
                 return (
@@ -509,7 +545,7 @@ export default function OrderDetail() {
                   </tr>
                 )
               })}
-              {tab === 'equipment' && filteredEq.map(e => {
+              {tab === 'catalog' && hasDates && filteredEq.map(e => {
                 const existing = itemsByEquipment[e.id]
                 const inv = availability.equipment[e.id] || {}
                 const av = inv.available ?? e.quantity
