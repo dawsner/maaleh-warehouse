@@ -49,6 +49,7 @@ export const equipmentAPI = {
   getByTag: (tag) => api.get(`/equipment/by-tag/${encodeURIComponent(tag)}`),
   create: (data) => api.post('/equipment', data),
   update: (id, data) => api.put(`/equipment/${id}`, data),
+  bulkUpdate: (data) => api.put('/equipment/bulk', data),  // {equipment_ids, category?, tags?, location?, allowed_years?, is_key_product?, insured?, active?}
   delete: (id) => api.delete(`/equipment/${id}`),
   importCsv: (file, dryRun = true) => {
     const fd = new FormData()

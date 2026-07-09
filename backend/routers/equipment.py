@@ -279,6 +279,38 @@ def update_equipment(
     return db_equipment
 
 
+@router.put("/bulk", response_model=dict)
+def bulk_update_equipment(
+    payload: schemas.EquipmentBulkUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin)
+):
+    """עדכון גורף של מספר פריטי ציוד — לספירת מלאי או שינויים המוניים."""
+    if not payload.equipment_ids:
+        raise HTTPException(status_code=400, detail="לא נבחרו פריטים")
+
+    items = db.query(models.Equipment).filter(models.Equipment.id.in_(payload.equipment_ids)).all()
+    if not items:
+        raise HTTPException(status_code=404, detail="לא נמצאו פריטים")
+
+    update_fields = payload.model_dump(exclude={"equipment_ids"}, exclude_unset=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="לא צוין שדה לעדכון")
+
+    for eq in items:
+        for key, value in update_fields.items():
+            setattr(eq, key, value)
+
+    log_activity(
+        db, user_id=current_user.id,
+        action="equipment.bulk_updated",
+        entity_type="equipment",
+        description=f"{current_user.name} עדכן {len(items)} פריטים בבת אחת: {', '.join(update_fields.keys())}",
+    )
+    db.commit()
+    return {"updated": len(items), "fields": list(update_fields.keys())}
+
+
 @router.delete("/{equipment_id}")
 def deactivate_equipment(
     equipment_id: int,

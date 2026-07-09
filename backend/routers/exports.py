@@ -41,23 +41,28 @@ def export_equipment(
         query = query.filter(models.Equipment.category == category)
     items = query.order_by(models.Equipment.category, models.Equipment.name).all()
 
-    fieldnames = ["מזהה", "שם", "קטגוריה", "יצרן", "דגם", "כמות",
-                  "מחיר", "מיקום", "מספר תג", "מבוטח", "הערות"]
+    fieldnames = ["מזהה", "שם", "שם לסטודנט", "קטגוריה ראשית", "קטגוריות נוספות",
+                  "יצרן", "דגם", "כמות", "מחיר", "מיקום", "מספר תג",
+                  "שנים מותרות", "מוצר מפתח", "מבוטח", "הערות"]
     rows = [{
         "מזהה": eq.id,
         "שם": eq.name,
-        "קטגוריה": eq.category,
+        "שם לסטודנט": eq.display_name_student or "",
+        "קטגוריה ראשית": eq.category,
+        "קטגוריות נוספות": eq.tags or "",
         "יצרן": eq.manufacturer or "",
         "דגם": eq.model_name or "",
         "כמות": eq.quantity,
         "מחיר": eq.price or 0,
         "מיקום": eq.location or "",
         "מספר תג": eq.tag_id or "",
+        "שנים מותרות": eq.allowed_years or f"{eq.min_year or 1}-{eq.max_year or 4}",
+        "מוצר מפתח": "כן" if eq.is_key_product else "",
         "מבוטח": "כן" if eq.insured else "לא",
         "הערות": eq.notes or "",
     } for eq in items]
 
-    filename = f"equipment-{datetime.now().strftime('%Y-%m-%d')}.csv"
+    filename = f"מלאי-מחסן-{datetime.now().strftime('%Y-%m-%d')}.csv"
     return _stream_csv(rows, fieldnames, filename)
 
 

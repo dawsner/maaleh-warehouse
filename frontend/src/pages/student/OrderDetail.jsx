@@ -553,11 +553,13 @@ export default function OrderDetail() {
                 const checkedOut = inv.checked_out ?? 0
                 const isKey = !!e.is_key_product
                 const maxQty = isKey ? av : undefined
+                // סטודנט רואה את display_name_student אם הוגדר (מוניטור A/B/C → מוניטור)
+                const shownName = e.display_name_student || e.name
                 return (
                   <tr key={e.id} className={`hover:bg-slate-50 ${existing ? 'bg-primary-50/30' : ''}`}>
                     <td className="px-4 py-2.5 font-bold text-slate-800">
                       {isKey && <span title="מוצר מפתח" className="mr-1">🔑</span>}
-                      📦 {e.name}{e.manufacturer && <span className="text-xs text-slate-400 mr-2">({e.manufacturer})</span>}
+                      📦 {shownName}
                     </td>
                     <td className="px-4 py-2.5 text-slate-500">{e.category}</td>
                     <td className="px-4 py-2.5 text-xs">

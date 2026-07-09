@@ -31,8 +31,10 @@ class Equipment(Base):
     __tablename__ = "equipment"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    category = Column(String, nullable=False)
+    name = Column(String, nullable=False)  # שם למחסן (פנימי)
+    display_name_student = Column(String, nullable=True)  # אם הוגדר — שם שמופיע לסטודנט (לפריטים כפולים)
+    category = Column(String, nullable=False)  # קטגוריה ראשית
+    tags = Column(Text, nullable=True)  # קטגוריות נוספות מופרדות בפסיק ("סאונד,מצלמה") — לפריטים בין-קטגוריאליים
     quantity = Column(Integer, default=1)
     insured = Column(Boolean, default=False)
     price = Column(Float, default=0.0)

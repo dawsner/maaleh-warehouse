@@ -62,12 +62,28 @@ class UserBulkUpdate(BaseModel):
     active: Optional[bool] = None
 
 
+class EquipmentBulkUpdate(BaseModel):
+    """עדכון גורף לפריטי ציוד — משמש לספירת מלאי / שינויים המוניים."""
+    model_config = ConfigDict(protected_namespaces=())
+
+    equipment_ids: List[int]
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    location: Optional[str] = None
+    allowed_years: Optional[str] = None
+    is_key_product: Optional[bool] = None
+    insured: Optional[bool] = None
+    active: Optional[bool] = None
+
+
 # Equipment schemas
 class EquipmentBase(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     name: str
+    display_name_student: Optional[str] = None  # שם לסטודנט; ריק = same as name
     category: str
+    tags: Optional[str] = None  # קטגוריות נוספות "סאונד,מצלמה"
     quantity: int = 1
     insured: bool = False
     price: float = 0.0
@@ -79,7 +95,7 @@ class EquipmentBase(BaseModel):
     notes: Optional[str] = None
     min_year: int = 1
     max_year: int = 4
-    allowed_years: Optional[str] = None  # "1,3,5" — רשימת שנים; ריק = min..max
+    allowed_years: Optional[str] = None
     is_key_product: bool = False
 
 
@@ -91,7 +107,9 @@ class EquipmentUpdate(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     name: Optional[str] = None
+    display_name_student: Optional[str] = None
     category: Optional[str] = None
+    tags: Optional[str] = None
     quantity: Optional[int] = None
     insured: Optional[bool] = None
     price: Optional[float] = None

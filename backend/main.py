@@ -35,6 +35,12 @@ def _run_migrations():
             if 'allowed_years' not in cols:
                 conn.execute(text("ALTER TABLE equipment ADD COLUMN allowed_years VARCHAR"))
                 print("[migration] Added equipment.allowed_years")
+            if 'display_name_student' not in cols:
+                conn.execute(text("ALTER TABLE equipment ADD COLUMN display_name_student VARCHAR"))
+                print("[migration] Added equipment.display_name_student")
+            if 'tags' not in cols:
+                conn.execute(text("ALTER TABLE equipment ADD COLUMN tags TEXT"))
+                print("[migration] Added equipment.tags")
 
     if 'users' in inspector.get_table_names():
         cols = {c['name'] for c in inspector.get_columns('users')}

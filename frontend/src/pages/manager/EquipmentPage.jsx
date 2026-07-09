@@ -3,6 +3,90 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { equipmentAPI, exportsAPI, downloadBlob, ordersAPI, kitsAPI } from '../../api'
 import Modal from '../../components/Modal'
 
+/** Modal לעריכה גורפת של פריטים נבחרים */
+function BulkEditModal({ open, onClose, count, onSubmit, categories }) {
+  const [field, setField] = useState('category')
+  const [value, setValue] = useState('')
+  const [boolValue, setBoolValue] = useState(false)
+
+  useEffect(() => { if (open) { setField('category'); setValue(''); setBoolValue(false) } }, [open])
+
+  if (!open) return null
+
+  const isBooleanField = ['is_key_product', 'insured', 'active'].includes(field)
+
+  const handle = () => {
+    const payload = {}
+    if (isBooleanField) payload[field] = boolValue
+    else if (value.trim()) payload[field] = value.trim()
+    else { alert('יש למלא ערך'); return }
+    onSubmit(payload)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()} dir="rtl">
+        <h2 className="text-lg font-extrabold text-slate-800">עריכה גורפת של {count} פריטים</h2>
+
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">מה לשנות?</label>
+          <select value={field} onChange={e => setField(e.target.value)}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
+            <option value="category">קטגוריה</option>
+            <option value="tags">קטגוריות נוספות (מופרד בפסיק)</option>
+            <option value="location">מיקום</option>
+            <option value="allowed_years">שנים מותרות (1,3,5)</option>
+            <option value="is_key_product">מוצר מפתח</option>
+            <option value="insured">מבוטח</option>
+            <option value="active">פעיל</option>
+          </select>
+        </div>
+
+        {isBooleanField ? (
+          <div>
+            <label className="flex items-center gap-3 cursor-pointer bg-slate-50 rounded-xl p-3">
+              <input type="checkbox" checked={boolValue} onChange={e => setBoolValue(e.target.checked)} className="w-4 h-4" />
+              <span className="text-sm font-medium">{boolValue ? '✓ כן' : 'לא'}</span>
+            </label>
+          </div>
+        ) : field === 'category' ? (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">בחר קטגוריה חדשה</label>
+            <select value={value} onChange={e => setValue(e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
+              <option value="">בחר...</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">ערך חדש</label>
+            <input type="text" value={value} onChange={e => setValue(e.target.value)}
+              placeholder={field === 'allowed_years' ? 'למשל: 1,3,5' : 'ערך חדש'}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
+          </div>
+        )}
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+          ⚠ הפעולה תשפיע על {count} פריטים — לא ניתן לבטל
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={handle}
+            className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-bold py-2.5 rounded-xl">
+            בצע
+          </button>
+          <button onClick={onClose}
+            className="flex-1 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl">
+            ביטול
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 /** טאבים לניווט בין ציוד לערכות (משותף לשני המסכים) */
 function InventoryTabs() {
   const location = useLocation()
@@ -67,10 +151,19 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
-          <label className="block text-sm font-semibold text-slate-700 mb-1">שם הציוד *</label>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">שם למחסן *</label>
           <input required value={form.name} onChange={e => set('name', e.target.value)}
+            placeholder="לדוגמה: מוניטור A"
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500" />
+          <p className="text-[10px] text-slate-400 mt-1">שם פנימי לניהול המחסן</p>
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">שם לסטודנט</label>
+          <input value={form.display_name_student || ''} onChange={e => set('display_name_student', e.target.value)}
+            placeholder="לדוגמה: מוניטור (ריק = כמו למחסן)"
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500" />
+          <p className="text-[10px] text-slate-400 mt-1">כמה שורות "מוניטור A/B/C" יופיעו כ"מוניטור" אחד</p>
         </div>
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-1">קטגוריה * {form.category && <span className="text-base">{iconForCategory(form.category)}</span>}</label>
@@ -97,6 +190,32 @@ function EquipmentForm({ initial, onSubmit, onClose, loading, existingCategories
               >הוסף</button>
             </div>
           )}
+        </div>
+        {/* קטגוריות נוספות — למוצרים בין-קטגוריאליים (כרטיס זכרון גם במצלמה וגם בסאונד) */}
+        <div className="col-span-2">
+          <label className="block text-sm font-semibold text-slate-700 mb-2">קטגוריות נוספות</label>
+          <div className="flex flex-wrap gap-2">
+            {allCategories.filter(c => c !== form.category).map(c => {
+              const tags = (form.tags || '').split(',').filter(Boolean).map(t => t.trim())
+              const isChecked = tags.includes(c)
+              return (
+                <label key={c} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all text-xs
+                  ${isChecked ? 'border-primary-400 bg-primary-50 text-primary-700 font-bold' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
+                  <input type="checkbox" checked={isChecked}
+                    onChange={e => {
+                      const cur = new Set(tags)
+                      if (e.target.checked) cur.add(c); else cur.delete(c)
+                      set('tags', Array.from(cur).join(','))
+                    }}
+                    className="w-3.5 h-3.5" />
+                  {iconForCategory(c)} {c}
+                </label>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1.5">
+            למוצרים משותפים (למשל כרטיס זכרון גם ב"מצלמה" וגם ב"סאונד")
+          </p>
         </div>
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-1">כמות *</label>
@@ -232,6 +351,7 @@ export default function EquipmentPage() {
   const [selected, setSelected] = useState(new Set())
   const [creatingKit, setCreatingKit] = useState(false)
   const [kitForm, setKitForm] = useState({ name: '', category: '', description: '', items: [] })
+  const [bulkOpen, setBulkOpen] = useState(false)
   const [tagSearch, setTagSearch] = useState('')
   const [tagResult, setTagResult] = useState(null)
   const [tagError, setTagError] = useState('')
@@ -558,9 +678,13 @@ export default function EquipmentPage() {
       {selected.size > 0 && (
         <div className="bg-primary-50 border-2 border-primary-300 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 sticky top-2 z-10 shadow-md">
           <div className="text-sm font-bold text-primary-800">{selected.size} פריטים נבחרו</div>
-          <div className="flex gap-2">
-            <button onClick={openCreateKit}
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setBulkOpen(true)}
               className="bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold px-4 py-2 rounded-xl">
+              ⚡ עריכה גורפת
+            </button>
+            <button onClick={openCreateKit}
+              className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold px-4 py-2 rounded-xl">
               🎒 צור ערכה מהבחירה
             </button>
             <button onClick={clearSelection}
@@ -702,6 +826,23 @@ export default function EquipmentPage() {
           existingCategories={categories}
         />
       </Modal>
+
+      {/* Bulk edit modal */}
+      <BulkEditModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        count={selected.size}
+        categories={categories}
+        onSubmit={async (fields) => {
+          try {
+            await equipmentAPI.bulkUpdate({ equipment_ids: Array.from(selected), ...fields })
+            setBulkOpen(false)
+            clearSelection()
+            load()
+            alert(`עודכנו ${selected.size} פריטים בהצלחה`)
+          } catch (e) { alert(e.response?.data?.detail || 'שגיאה') }
+        }}
+      />
 
       {/* Create Kit from selection */}
       <Modal isOpen={creatingKit} onClose={() => setCreatingKit(false)}
