@@ -137,15 +137,17 @@ class EquipmentOut(EquipmentBase):
 
 # Kit schemas
 class KitItemCreate(BaseModel):
-    equipment_id: int
+    equipment_id: Optional[int] = None  # אם None → פריט חופשי
+    custom_name: Optional[str] = None    # רק לפריט חופשי
     quantity_needed: int = 1
 
 
 class KitItemOut(BaseModel):
     id: int
-    equipment_id: int
+    equipment_id: Optional[int] = None
+    custom_name: Optional[str] = None
     quantity_needed: int
-    equipment: EquipmentOut
+    equipment: Optional[EquipmentOut] = None
 
     class Config:
         from_attributes = True

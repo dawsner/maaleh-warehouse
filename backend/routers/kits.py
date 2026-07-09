@@ -182,9 +182,13 @@ def create_kit(
     db.flush()
 
     for item in kit.items:
+        # ולידציה — חייב או equipment_id או custom_name
+        if not item.equipment_id and not (item.custom_name and item.custom_name.strip()):
+            raise HTTPException(status_code=400, detail="פריט חייב להיות עם ציוד מהמלאי או שם חופשי")
         db_item = models.KitItem(
             kit_id=db_kit.id,
             equipment_id=item.equipment_id,
+            custom_name=(item.custom_name or None) if not item.equipment_id else None,
             quantity_needed=item.quantity_needed
         )
         db.add(db_item)
@@ -218,9 +222,12 @@ def update_kit(
         db.query(models.KitItem).filter(models.KitItem.kit_id == kit_id).delete()
         # Add new items
         for item in kit.items:
+            if not item.equipment_id and not (item.custom_name and item.custom_name.strip()):
+                raise HTTPException(status_code=400, detail="פריט חייב להיות עם ציוד מהמלאי או שם חופשי")
             db_item = models.KitItem(
                 kit_id=kit_id,
                 equipment_id=item.equipment_id,
+                custom_name=(item.custom_name or None) if not item.equipment_id else None,
                 quantity_needed=item.quantity_needed
             )
             db.add(db_item)

@@ -3,6 +3,127 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { equipmentAPI, exportsAPI, downloadBlob, ordersAPI, kitsAPI } from '../../api'
 import Modal from '../../components/Modal'
 
+/**
+ * הגדרת עמודות הטבלה — כל עמודה עם key, label ותאור.
+ * שם ופעולות תמיד מוצגות.
+ */
+const ALL_COLUMNS = [
+  { key: 'display_name_student', label: 'שם לסטודנט' },
+  { key: 'category',              label: 'קטגוריה' },
+  { key: 'tags',                  label: 'קטגוריות נוספות' },
+  { key: 'quantity',              label: 'סה"כ' },
+  { key: 'checked_out',           label: 'בחוץ עכשיו' },
+  { key: 'in_store',              label: 'במחסן' },
+  { key: 'in_kits',               label: 'בערכות' },
+  { key: 'manufacturer',          label: 'יצרן' },
+  { key: 'model_name',            label: 'דגם' },
+  { key: 'tag_id',                label: 'מק"ט' },
+  { key: 'location',              label: 'מיקום' },
+  { key: 'price',                 label: 'מחיר' },
+  { key: 'allowed_years',         label: 'שנים מותרות' },
+  { key: 'is_key_product',        label: 'מוצר מפתח' },
+  { key: 'insured',               label: 'מבוטח' },
+  { key: 'notes',                 label: 'הערות' },
+]
+
+const DEFAULT_COLUMNS = ['category', 'quantity', 'checked_out', 'in_store', 'in_kits']
+const VIEWS_STORAGE_KEY = 'maaleh.equipment.views.v1'
+
+function loadViews() {
+  try { return JSON.parse(localStorage.getItem(VIEWS_STORAGE_KEY) || '[]') } catch { return [] }
+}
+function saveViews(v) { localStorage.setItem(VIEWS_STORAGE_KEY, JSON.stringify(v)) }
+
+/** Modal לניהול תצוגות — יצירה/מחיקה/עריכת עמודות */
+function ViewsModal({ open, onClose, currentColumns, onSelect, viewsRefreshKey }) {
+  const [views, setViews] = useState(loadViews())
+  const [newName, setNewName] = useState('')
+  const [selectedColumns, setSelectedColumns] = useState(currentColumns)
+
+  useEffect(() => { if (open) { setViews(loadViews()); setSelectedColumns(currentColumns); setNewName('') } }, [open, viewsRefreshKey])
+
+  if (!open) return null
+
+  const toggleColumn = (key) => {
+    setSelectedColumns(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
+  const saveView = () => {
+    if (!newName.trim()) { alert('יש לתת שם לתצוגה'); return }
+    const next = [...views.filter(v => v.name !== newName.trim()), { name: newName.trim(), columns: selectedColumns }]
+    setViews(next); saveViews(next); setNewName('')
+    alert(`התצוגה "${newName}" נשמרה`)
+  }
+  const applyColumns = () => { onSelect(selectedColumns); onClose() }
+  const deleteView = (name) => {
+    if (!confirm(`למחוק את התצוגה "${name}"?`)) return
+    const next = views.filter(v => v.name !== name)
+    setViews(next); saveViews(next)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
+        <h2 className="text-lg font-extrabold text-slate-800">ניהול תצוגות מותאמות</h2>
+
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">בחר אילו עמודות להציג:</label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {ALL_COLUMNS.map(col => (
+              <label key={col.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs
+                ${selectedColumns.includes(col.key) ? 'border-primary-400 bg-primary-50 text-primary-800 font-bold' : 'border-slate-200 bg-white text-slate-500'}`}>
+                <input type="checkbox" checked={selectedColumns.includes(col.key)} onChange={() => toggleColumn(col.key)} className="w-3.5 h-3.5" />
+                {col.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100 pt-4">
+          <label className="block text-sm font-semibold text-slate-700 mb-2">שמירת תצוגה חדשה בשם:</label>
+          <div className="flex gap-2">
+            <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+              placeholder="למשל: מלאי בסיסי / רק כספי / מלא"
+              className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            <button onClick={saveView}
+              className="bg-primary-600 text-white text-sm font-bold px-4 py-2 rounded-xl">
+              💾 שמור
+            </button>
+          </div>
+        </div>
+
+        {views.length > 0 && (
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-sm font-semibold text-slate-700 mb-2">תצוגות שמורות:</p>
+            <div className="space-y-1.5">
+              {views.map(v => (
+                <div key={v.name} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                  <button onClick={() => { setSelectedColumns(v.columns); onSelect(v.columns); onClose() }}
+                    className="flex-1 text-right text-sm font-bold text-primary-700 hover:underline">
+                    {v.name} <span className="text-[10px] text-slate-400">({v.columns.length} עמודות)</span>
+                  </button>
+                  <button onClick={() => deleteView(v.name)} className="text-red-400 hover:text-red-600 text-sm">✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-2">
+          <button onClick={applyColumns}
+            className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-bold py-2.5 rounded-xl">
+            החל בחירה עכשיו (ללא שמירה)
+          </button>
+          <button onClick={onClose}
+            className="flex-1 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl">
+            סגור
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 /** Modal לעריכה גורפת של פריטים נבחרים */
 function BulkEditModal({ open, onClose, count, onSubmit, categories }) {
   const [field, setField] = useState('category')
@@ -352,6 +473,18 @@ export default function EquipmentPage() {
   const [creatingKit, setCreatingKit] = useState(false)
   const [kitForm, setKitForm] = useState({ name: '', category: '', description: '', items: [] })
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [viewsOpen, setViewsOpen] = useState(false)
+  const [activeColumns, setActiveColumns] = useState(() => {
+    try {
+      const saved = localStorage.getItem('maaleh.equipment.activeColumns')
+      return saved ? JSON.parse(saved) : DEFAULT_COLUMNS
+    } catch { return DEFAULT_COLUMNS }
+  })
+  const isColActive = (key) => activeColumns.includes(key)
+  const setColumns = (cols) => {
+    setActiveColumns(cols)
+    try { localStorage.setItem('maaleh.equipment.activeColumns', JSON.stringify(cols)) } catch {}
+  }
   const [tagSearch, setTagSearch] = useState('')
   const [tagResult, setTagResult] = useState(null)
   const [tagError, setTagError] = useState('')
@@ -524,6 +657,12 @@ export default function EquipmentPage() {
           <p className="text-slate-500 text-sm mt-1">{equipment.length} פריטים פעילים</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setViewsOpen(true)}
+            className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 text-sm">
+            <span>⚙️</span>
+            <span className="hidden sm:inline">תצוגות</span>
+          </button>
           <button
             onClick={() => setImportOpen(true)}
             className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 text-sm">
@@ -711,13 +850,23 @@ export default function EquipmentPage() {
                       onChange={() => selected.size === equipment.length ? clearSelection() : setSelected(new Set(equipment.map(e => e.id)))}
                       className="w-4 h-4" />
                   </th>
-                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שם</th>
-                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">קטגוריה</th>
-                  <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">סה״כ</th>
-                  <th className="text-center text-xs font-semibold bg-orange-50 text-orange-700 px-2 py-3" title="פיזית בחוץ עכשיו">בחוץ עכשיו</th>
-                  <th className="text-center text-xs font-semibold bg-emerald-50 text-emerald-700 px-2 py-3" title="פיזית במחסן עכשיו">במחסן</th>
-                  <th className="text-right text-xs font-semibold bg-purple-50 text-purple-700 px-4 py-3" title="באילו ערכות נמצא הפריט">בערכות</th>
-                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פרטים</th>
+                  <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שם למחסן</th>
+                  {isColActive('display_name_student') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שם לסטודנט</th>}
+                  {isColActive('category') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">קטגוריה</th>}
+                  {isColActive('tags') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">קט' נוספות</th>}
+                  {isColActive('quantity') && <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">סה״כ</th>}
+                  {isColActive('checked_out') && <th className="text-center text-xs font-semibold bg-orange-50 text-orange-700 px-2 py-3" title="פיזית בחוץ עכשיו">בחוץ עכשיו</th>}
+                  {isColActive('in_store') && <th className="text-center text-xs font-semibold bg-emerald-50 text-emerald-700 px-2 py-3" title="פיזית במחסן עכשיו">במחסן</th>}
+                  {isColActive('in_kits') && <th className="text-right text-xs font-semibold bg-purple-50 text-purple-700 px-4 py-3" title="באילו ערכות נמצא הפריט">בערכות</th>}
+                  {isColActive('manufacturer') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">יצרן</th>}
+                  {isColActive('model_name') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">דגם</th>}
+                  {isColActive('tag_id') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">מק"ט</th>}
+                  {isColActive('location') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">מיקום</th>}
+                  {isColActive('price') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">מחיר</th>}
+                  {isColActive('allowed_years') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">שנים מותרות</th>}
+                  {isColActive('is_key_product') && <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">מפתח</th>}
+                  {isColActive('insured') && <th className="text-center text-xs font-semibold text-slate-500 px-2 py-3">מבוטח</th>}
+                  {isColActive('notes') && <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">הערות</th>}
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">פעולות</th>
                 </tr>
               </thead>
@@ -756,37 +905,85 @@ export default function EquipmentPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-medium">{item.category}</span>
-                    </td>
-                    <td className="px-2 py-3 text-center text-sm font-bold text-slate-700">{item.quantity}</td>
-                    <td className="px-2 py-3 text-center">
-                      <span className={`text-sm font-bold ${checkedOut > 0 ? 'text-orange-700' : 'text-slate-300'}`}>{checkedOut}</span>
-                    </td>
-                    <td className="px-2 py-3 text-center">
-                      <span className={`text-sm font-bold ${
-                        inStore === 0 ? 'text-rose-700 bg-rose-50 px-2 py-0.5 rounded' :
-                        inStore < item.quantity ? 'text-emerald-700' : 'text-slate-700'
-                      }`}>{inStore}</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs">
-                      {itemKits.length === 0 ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {itemKits.map(k => (
-                            <span key={k.id} className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold">
-                              🎒 {k.name}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      {item.manufacturer && <div>{item.manufacturer}</div>}
-                      {item.location && <div className="text-slate-400">📍 {item.location}</div>}
-                      {item.insured && <div className="text-green-600">✓ מבוטח</div>}
-                    </td>
+                    {isColActive('display_name_student') && (
+                      <td className="px-4 py-3 text-sm text-slate-600">{item.display_name_student || '—'}</td>
+                    )}
+                    {isColActive('category') && (
+                      <td className="px-4 py-3">
+                        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-medium">{item.category}</span>
+                      </td>
+                    )}
+                    {isColActive('tags') && (
+                      <td className="px-4 py-3 text-xs">
+                        {item.tags ? (
+                          <div className="flex flex-wrap gap-1">
+                            {item.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => (
+                              <span key={t} className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">{t}</span>
+                            ))}
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {isColActive('quantity') && (
+                      <td className="px-2 py-3 text-center text-sm font-bold text-slate-700">{item.quantity}</td>
+                    )}
+                    {isColActive('checked_out') && (
+                      <td className="px-2 py-3 text-center">
+                        <span className={`text-sm font-bold ${checkedOut > 0 ? 'text-orange-700' : 'text-slate-300'}`}>{checkedOut}</span>
+                      </td>
+                    )}
+                    {isColActive('in_store') && (
+                      <td className="px-2 py-3 text-center">
+                        <span className={`text-sm font-bold ${
+                          inStore === 0 ? 'text-rose-700 bg-rose-50 px-2 py-0.5 rounded' :
+                          inStore < item.quantity ? 'text-emerald-700' : 'text-slate-700'
+                        }`}>{inStore}</span>
+                      </td>
+                    )}
+                    {isColActive('in_kits') && (
+                      <td className="px-4 py-3 text-xs">
+                        {itemKits.length === 0 ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {itemKits.map(k => (
+                              <span key={k.id} className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold">
+                                🎒 {k.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    )}
+                    {isColActive('manufacturer') && (
+                      <td className="px-4 py-3 text-sm text-slate-600">{item.manufacturer || '—'}</td>
+                    )}
+                    {isColActive('model_name') && (
+                      <td className="px-4 py-3 text-sm text-slate-600">{item.model_name || '—'}</td>
+                    )}
+                    {isColActive('tag_id') && (
+                      <td className="px-4 py-3 text-xs font-mono text-slate-600">{item.tag_id || '—'}</td>
+                    )}
+                    {isColActive('location') && (
+                      <td className="px-4 py-3 text-xs text-slate-500">{item.location ? `📍 ${item.location}` : '—'}</td>
+                    )}
+                    {isColActive('price') && (
+                      <td className="px-4 py-3 text-sm text-slate-600">{item.price ? `₪${item.price}` : '—'}</td>
+                    )}
+                    {isColActive('allowed_years') && (
+                      <td className="px-4 py-3 text-xs text-slate-600">
+                        {item.allowed_years || `${item.min_year || 1}-${item.max_year || 4}`}
+                      </td>
+                    )}
+                    {isColActive('is_key_product') && (
+                      <td className="px-2 py-3 text-center">{item.is_key_product ? <span title="מוצר מפתח">🔑</span> : <span className="text-slate-300">—</span>}</td>
+                    )}
+                    {isColActive('insured') && (
+                      <td className="px-2 py-3 text-center">{item.insured ? <span className="text-green-600">✓</span> : <span className="text-slate-300">—</span>}</td>
+                    )}
+                    {isColActive('notes') && (
+                      <td className="px-4 py-3 text-xs text-slate-500">{item.notes || '—'}</td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button onClick={() => openEdit(item)}
@@ -826,6 +1023,14 @@ export default function EquipmentPage() {
           existingCategories={categories}
         />
       </Modal>
+
+      {/* Views modal — בחירת עמודות ותצוגות שמורות */}
+      <ViewsModal
+        open={viewsOpen}
+        onClose={() => setViewsOpen(false)}
+        currentColumns={activeColumns}
+        onSelect={setColumns}
+      />
 
       {/* Bulk edit modal */}
       <BulkEditModal

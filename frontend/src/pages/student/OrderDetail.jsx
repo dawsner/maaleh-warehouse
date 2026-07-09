@@ -529,7 +529,7 @@ export default function OrderDetail() {
                           <span className="font-bold text-slate-400">כולל: </span>
                           {k.items.map((i, idx) => (
                             <span key={i.id}>
-                              {i.equipment?.name}
+                              {i.equipment?.name || i.custom_name || 'פריט'}
                               {i.quantity_needed > 1 && <span className="text-slate-400"> ×{i.quantity_needed}</span>}
                               {idx < k.items.length - 1 && ', '}
                             </span>

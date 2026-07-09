@@ -106,7 +106,11 @@ function KitForm({ initial, onSubmit, onClose, loading, allEquipment }) {
     name: '', name_en: '', description: '', category: '',
     min_year: 1, max_year: 4, image_url: '', items: [], ...initial
   })
-  const [items, setItems] = useState(initial?.items?.map(i => ({ equipment_id: i.equipment_id, quantity_needed: i.quantity_needed })) || [])
+  const [items, setItems] = useState(initial?.items?.map(i => ({
+    equipment_id: i.equipment_id,
+    custom_name: i.custom_name,
+    quantity_needed: i.quantity_needed
+  })) || [])
   const [imgError, setImgError] = useState(false)
 
   const set = (k, v) => {
@@ -114,13 +118,16 @@ function KitForm({ initial, onSubmit, onClose, loading, allEquipment }) {
     setForm(f => ({ ...f, [k]: v }))
   }
 
-  const addItem = () => setItems(prev => [...prev, { equipment_id: '', quantity_needed: 1 }])
+  const addItem = () => setItems(prev => [...prev, { equipment_id: '', custom_name: '', quantity_needed: 1 }])
+  const addCustomItem = () => setItems(prev => [...prev, { equipment_id: null, custom_name: '', quantity_needed: 1 }])
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx))
   const updateItem = (idx, key, val) => setItems(prev => prev.map((item, i) => i === idx ? { ...item, [key]: val } : item))
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    onSubmit({ ...form, items: items.filter(i => i.equipment_id) })
+    // מסננים פריטים ריקים; שומרים רק פריטי ציוד אמיתי או פריטים חופשיים עם שם
+    const validItems = items.filter(i => i.equipment_id || (i.custom_name && i.custom_name.trim()))
+    onSubmit({ ...form, items: validItems })
   }
 
   return (
@@ -188,31 +195,51 @@ function KitForm({ initial, onSubmit, onClose, loading, allEquipment }) {
 
       {/* Kit items */}
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <label className="text-sm font-bold text-slate-700">פריטים בערכה</label>
-          <button type="button" onClick={addItem}
-            className="text-xs bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1.5 rounded-lg font-medium transition-all">
-            + הוסף פריט
-          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={addItem}
+              className="text-xs bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1.5 rounded-lg font-medium transition-all">
+              + פריט מהמלאי
+            </button>
+            <button type="button" onClick={addCustomItem}
+              className="text-xs bg-amber-50 text-amber-700 hover:bg-amber-100 px-3 py-1.5 rounded-lg font-medium transition-all">
+              + פריט חופשי (טקסט)
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
-          {items.map((item, idx) => (
-            <div key={idx} className="flex gap-2 items-center bg-slate-50 rounded-xl p-3">
-              <EquipmentPicker
-                value={item.equipment_id}
-                onChange={(id) => updateItem(idx, 'equipment_id', id)}
-                allEquipment={allEquipment}
-              />
-              <input type="number" min="1" value={item.quantity_needed}
-                onChange={e => updateItem(idx, 'quantity_needed', parseInt(e.target.value))}
-                className="w-16 border border-slate-200 rounded-lg px-2 py-2 text-sm text-center focus:ring-2 focus:ring-primary-500 bg-white"
-              />
-              <button type="button" onClick={() => removeItem(idx)}
-                className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-                ✕
-              </button>
-            </div>
-          ))}
+          {items.map((item, idx) => {
+            const isCustom = item.equipment_id === null || item.equipment_id === undefined && item.custom_name !== undefined
+            const isFreeText = item.equipment_id === null || (!item.equipment_id && item.custom_name !== undefined)
+            return (
+              <div key={idx} className={`flex gap-2 items-center rounded-xl p-3 ${isFreeText ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                {isFreeText ? (
+                  <>
+                    <span className="text-amber-700 text-xs font-bold flex-shrink-0">✏️ חופשי:</span>
+                    <input type="text" value={item.custom_name || ''}
+                      onChange={e => updateItem(idx, 'custom_name', e.target.value)}
+                      placeholder="שם פריט חופשי (למשל: אחר)"
+                      className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+                  </>
+                ) : (
+                  <EquipmentPicker
+                    value={item.equipment_id}
+                    onChange={(id) => updateItem(idx, 'equipment_id', id)}
+                    allEquipment={allEquipment}
+                  />
+                )}
+                <input type="number" min="1" value={item.quantity_needed}
+                  onChange={e => updateItem(idx, 'quantity_needed', parseInt(e.target.value))}
+                  className="w-16 border border-slate-200 rounded-lg px-2 py-2 text-sm text-center focus:ring-2 focus:ring-primary-500 bg-white"
+                />
+                <button type="button" onClick={() => removeItem(idx)}
+                  className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
+                  ✕
+                </button>
+              </div>
+            )
+          })}
           {items.length === 0 && (
             <p className="text-sm text-slate-400 text-center py-3">לא נוספו פריטים לערכה</p>
           )}

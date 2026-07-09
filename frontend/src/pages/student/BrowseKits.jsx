@@ -78,7 +78,7 @@ function KitCard({ kit, userYear, onAdd, avail, inCart }) {
               {kit.items.map(item => (
                 <li key={item.id} className="text-xs text-slate-600 flex items-center gap-1.5">
                   <span className="w-1 h-1 rounded-full bg-slate-400 flex-shrink-0" />
-                  {item.equipment?.name}
+                  {item.equipment?.name || item.custom_name || 'פריט'}
                   {item.quantity_needed > 1 && <span className="text-slate-400 font-medium">×{item.quantity_needed}</span>}
                 </li>
               ))}

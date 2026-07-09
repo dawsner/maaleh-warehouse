@@ -80,7 +80,8 @@ class KitItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     kit_id = Column(Integer, ForeignKey("kits.id"), nullable=False)
-    equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=False)
+    equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=True)  # nullable כדי לאפשר פריט חופשי
+    custom_name = Column(String, nullable=True)  # שם טקסט חופשי לפריט שלא ברשימת ציוד
     quantity_needed = Column(Integer, default=1)
 
     kit = relationship("Kit", back_populates="items")

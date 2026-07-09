@@ -49,6 +49,38 @@ def _run_migrations():
                 conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR DEFAULT 'active'"))
                 print("[migration] Added users.status")
 
+    if 'kit_items' in inspector.get_table_names():
+        cols_info = inspector.get_columns('kit_items')
+        cols = {c['name'] for c in cols_info}
+        with engine.begin() as conn:
+            if 'custom_name' not in cols:
+                conn.execute(text("ALTER TABLE kit_items ADD COLUMN custom_name VARCHAR"))
+                print("[migration] Added kit_items.custom_name")
+
+        # לוודא ש-equipment_id יכול להיות NULL (לאפשר פריט חופשי)
+        eq_col = next((c for c in cols_info if c['name'] == 'equipment_id'), None)
+        if eq_col and not eq_col.get('nullable', True):
+            print("[migration] Rebuilding kit_items to make equipment_id nullable...")
+            with engine.begin() as conn:
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                conn.execute(text("""
+                    CREATE TABLE kit_items_new (
+                        id INTEGER PRIMARY KEY,
+                        kit_id INTEGER NOT NULL REFERENCES kits(id),
+                        equipment_id INTEGER REFERENCES equipment(id),
+                        custom_name VARCHAR,
+                        quantity_needed INTEGER DEFAULT 1
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO kit_items_new (id, kit_id, equipment_id, custom_name, quantity_needed)
+                    SELECT id, kit_id, equipment_id, custom_name, quantity_needed FROM kit_items
+                """))
+                conn.execute(text("DROP TABLE kit_items"))
+                conn.execute(text("ALTER TABLE kit_items_new RENAME TO kit_items"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+            print("[migration] kit_items rebuilt")
+
     if 'orders' in inspector.get_table_names():
         cols = {c['name'] for c in inspector.get_columns('orders')}
         with engine.begin() as conn:
