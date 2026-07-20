@@ -71,21 +71,20 @@ def _equipment_available_in_range(
         """כמה יחידות נתפסות לפי הסטטוס.
         - pending/ready: requested (שריון רך לתאריכים)
         - checked_out:
-            * אם המנהל קבע quantity_issued במפורש — משתמשים בו (issued − returned)
-            * אם עוד null — fallback לכמות המבוקשת (הנחה סמויה שהכל יצא)
-              כך שהמלאי לא "מדליף" כשהמנהל שכח למלא
+            * quantity_issued חסר/0 (ברירת מחדל של SQLite) → fallback לכמות המבוקשת
+              כי המנהל עוד לא סימן ידנית שיצא — נניח שהכל יצא
+            * quantity_issued > 0 → משתמשים בו (issued − returned)
         """
         st = it.order.status
         if st in RESERVES_FULL_STATUSES:
             return it.quantity or 1
         if st in RESERVES_ISSUED_STATUSES:
-            if it.quantity_issued is None:
-                # לא מולא ידנית — נניח שכל הכמות המבוקשת יצאה
-                returned = it.quantity_returned if it.quantity_returned is not None else 0
+            # falsy תופס None *וגם* 0 (ה-DEFAULT של SQLite לרשומות חדשות)
+            if not it.quantity_issued:
+                returned = it.quantity_returned or 0
                 return max(0, (it.quantity or 1) - returned)
-            issued = it.quantity_issued
-            returned = it.quantity_returned if it.quantity_returned is not None else 0
-            return max(0, issued - returned)
+            returned = it.quantity_returned or 0
+            return max(0, it.quantity_issued - returned)
         return 0
 
     blocking = 0
@@ -278,12 +277,11 @@ def _equipment_breakdown_in_range(
             continue
         if order.status in ("pending", "ready"):
             reserved += it.quantity or 1
-        else:  # checked_out — fallback לכמות המבוקשת אם quantity_issued לא הוגדר
-            if it.quantity_issued is None:
-                returned = it.quantity_returned if it.quantity_returned is not None else 0
+        else:  # checked_out — falsy תופס None וגם 0 (ברירת מחדל של SQLite)
+            returned = it.quantity_returned or 0
+            if not it.quantity_issued:
                 checked_out_count += max(0, (it.quantity or 1) - returned)
             else:
-                returned = it.quantity_returned if it.quantity_returned is not None else 0
                 checked_out_count += max(0, it.quantity_issued - returned)
 
     # דרך ערכה
@@ -306,11 +304,10 @@ def _equipment_breakdown_in_range(
         if order.status in ("pending", "ready"):
             reserved += per_unit * (it.quantity or 1)
         else:
-            if it.quantity_issued is None:
-                returned = it.quantity_returned if it.quantity_returned is not None else 0
+            returned = it.quantity_returned or 0
+            if not it.quantity_issued:
                 checked_out_count += per_unit * max(0, (it.quantity or 1) - returned)
             else:
-                returned = it.quantity_returned if it.quantity_returned is not None else 0
                 checked_out_count += per_unit * max(0, it.quantity_issued - returned)
 
     total = eq.quantity or 0
