@@ -670,6 +670,27 @@ def add_item(
     kit, eq = _validate_item_payload(db, item)
     qty = max(1, int(item.quantity or 1))
 
+    # --- אכיפת מוצר מפתח: לא ניתן להזמין מעל הזמין ---
+    if eq and eq.is_key_product and o.loan_date and o.due_date:
+        # מחשבים כמה זמין בטווח, לא כולל הפריט הנוכחי (אם קיים)
+        existing_id = None
+        if item.equipment_id:
+            existing = next((it for it in o.items if it.equipment_id == item.equipment_id and it.returned_at is None), None)
+            if existing:
+                existing_id = existing.id
+        available = _equipment_available_in_range(
+            eq.id, qty, db,
+            start=o.loan_date, end=o.due_date,
+            exclude_order_item_id=existing_id,
+        )
+        existing_qty = existing.quantity if existing else 0
+        wanted_total = existing_qty + qty
+        if available < wanted_total:
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{eq.name}' — מוצר מפתח. זמין רק {available} בתאריכים {o.loan_date.strftime('%d/%m')} - {o.due_date.strftime('%d/%m')}. לא ניתן להזמין {wanted_total}."
+            )
+
     # --- ערכה: הרחבה לפריטים בודדים (במקום שורת "ערכה" אחת) ---
     # לפי בקשת לקוח — הזמנת ערכה פורשת אוטומטית את כל הפריטים בה כשורות נפרדות
     if kit:
@@ -782,7 +803,20 @@ def update_item(
 
     if payload.quantity is not None:
         old_qty = it.quantity
-        it.quantity = max(1, int(payload.quantity))
+        new_qty = max(1, int(payload.quantity))
+        # אכיפת מוצר מפתח — לא לחרוג מהזמין
+        if it.equipment and it.equipment.is_key_product and new_qty > old_qty and o.loan_date and o.due_date:
+            available = _equipment_available_in_range(
+                it.equipment_id, new_qty, db,
+                start=o.loan_date, end=o.due_date,
+                exclude_order_item_id=it.id,  # לא לספור את הפריט הזה עצמו כחוסם
+            )
+            if available < new_qty:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"'{it.equipment.name}' — מוצר מפתח. זמין רק {available} בתאריכים אלה. לא ניתן להעלות ל-{new_qty}."
+                )
+        it.quantity = new_qty
         if old_qty != it.quantity:
             _notify_late_change(db, o, current_user,
                                 f"שינה כמות של '{_item_label(it)}' מ-{old_qty} ל-{it.quantity}")
