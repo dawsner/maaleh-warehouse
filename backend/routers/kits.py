@@ -136,7 +136,8 @@ def get_kit_availability(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    count = calculate_kit_availability(kit_id, db, at_date=at, until_date=until)
+    from routers.orders import _kit_available_in_range
+    count = _kit_available_in_range(kit_id, db, start=at, end=until or at)
     return {"is_available": count > 0, "count_available": count}
 
 
@@ -150,8 +151,9 @@ def get_bulk_availability(
     """
     kits = db.query(models.Kit).filter(models.Kit.active == True).all()
     result = {}
+    from routers.orders import _kit_available_in_range
     for kit in kits:
-        count = calculate_kit_availability(kit.id, db)
+        count = _kit_available_in_range(kit.id, db)
         result[kit.id] = {"is_available": count > 0, "count_available": count}
     return result
 

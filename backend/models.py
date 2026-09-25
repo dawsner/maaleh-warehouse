@@ -190,6 +190,8 @@ class OrderItem(Base):
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
     kit_id = Column(Integer, ForeignKey("kits.id"), nullable=True)
     equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=True)
+    # אם השורה נוצרה מפריסת ערכה — מזהה הערכה. None = הוזמן כפריט בודד.
+    from_kit_id = Column(Integer, ForeignKey("kits.id"), nullable=True)
     quantity = Column(Integer, default=1)
     # null = "טרם נקבע"; 0 = "המנהל סימן במפורש שלא יצא/חזר" (ייחשב כפער)
     quantity_issued = Column(Integer, nullable=True)

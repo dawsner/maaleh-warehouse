@@ -49,6 +49,118 @@ def _serialize_crew(crew_list):
     return json.dumps([m.model_dump() if hasattr(m, 'model_dump') else m for m in crew_list], ensure_ascii=False)
 
 
+def _overlaps(order: models.Order, start: datetime, end: datetime, now: datetime) -> bool:
+    o_start = order.loan_date or order.requested_at or now
+    o_end = order.due_date or o_start
+    return start <= o_end and end >= o_start
+
+
+def _blocked_units(it: models.OrderItem) -> int:
+    """כמה יחידות שורת הזמנה תופסת לפי הסטטוס.
+    - pending/ready: הכמות המבוקשת (שריון רך לתאריכים)
+    - checked_out: quantity_issued (או המבוקש אם עוד לא סומן — falsy תופס None וגם 0) פחות מה שחזר
+    """
+    st = it.order.status
+    if st in RESERVES_FULL_STATUSES:
+        return it.quantity or 1
+    if st in RESERVES_ISSUED_STATUSES:
+        returned = it.quantity_returned or 0
+        base = it.quantity_issued if it.quantity_issued else (it.quantity or 1)
+        return max(0, base - returned)
+    return 0
+
+
+def _kit_reserved_units(equipment_id: int, db: Session) -> int:
+    """כמה יחידות מהפריט שמורות לערכות פעילות (כל ערכה = ערכה פיזית אחת)."""
+    rows = db.query(models.KitItem).join(models.Kit, models.KitItem.kit_id == models.Kit.id).filter(
+        models.KitItem.equipment_id == equipment_id,
+        models.Kit.active == True,
+    ).all()
+    return sum((ki.quantity_needed or 1) for ki in rows)
+
+
+def _equipment_pools(
+    equipment_id: int,
+    db: Session,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    exclude_order_item_id: Optional[int] = None,
+) -> dict:
+    """חלוקת המלאי של פריט לשני מאגרים:
+    - מאגר ערכות  = היחידות ששייכות לערכות (ניתנות להשאלה רק דרך הערכה)
+    - מאגר בודד   = כל השאר (total - kit_reserved) — ניתן להשאלה ישירה
+    מחזיר גם את החסימות לפי מקור (דרך ערכה / ישיר) וסטטוס.
+    """
+    eq = db.query(models.Equipment).filter(models.Equipment.id == equipment_id).first()
+    empty = {"total": 0, "in_kits": 0, "reserved": 0, "checked_out": 0,
+             "available": 0, "kit_side_available": 0}
+    if not eq or not eq.active:
+        return empty
+    now = datetime.utcnow()
+    start = start or now
+    end = end or start
+    total = eq.quantity or 0
+    in_kits = min(total, _kit_reserved_units(equipment_id, db))
+
+    relevant = list(RESERVES_FULL_STATUSES | RESERVES_ISSUED_STATUSES)
+    direct_block = 0
+    kit_block = 0
+    reserved = 0
+    checked_out = 0
+
+    # שורות ציוד (כולל שורות שנפרסו מערכה — from_kit_id)
+    lines = db.query(models.OrderItem).join(models.Order).filter(
+        models.OrderItem.equipment_id == equipment_id,
+        models.Order.status.in_(relevant),
+    ).all()
+    for it in lines:
+        if exclude_order_item_id and it.id == exclude_order_item_id:
+            continue
+        if not _overlaps(it.order, start, end, now):
+            continue
+        u = _blocked_units(it)
+        if not u:
+            continue
+        if it.from_kit_id:
+            kit_block += u
+        else:
+            direct_block += u
+        if it.order.status in RESERVES_FULL_STATUSES:
+            reserved += u
+        else:
+            checked_out += u
+
+    # תאימות אחורה: שורות ערכה ישנות (kit_id) שלא נפרסו
+    legacy = db.query(models.OrderItem).join(models.Order).filter(
+        models.OrderItem.kit_id != None,
+        models.Order.status.in_(relevant),
+    ).options(joinedload(models.OrderItem.kit).joinedload(models.Kit.items)).all()
+    for it in legacy:
+        if not it.kit or (exclude_order_item_id and it.id == exclude_order_item_id):
+            continue
+        contains = next((ki for ki in it.kit.items if ki.equipment_id == equipment_id), None)
+        if not contains or not _overlaps(it.order, start, end, now):
+            continue
+        u = (contains.quantity_needed or 1) * _blocked_units(it)
+        kit_block += u
+        if it.order.status in RESERVES_FULL_STATUSES:
+            reserved += u
+        else:
+            checked_out += u
+
+    standalone_pool = total - in_kits
+    # חריגה של הזמנות ישירות מעבר למאגר הבודד (נתונים ישנים) נאכלת ממאגר הערכות
+    direct_overflow = max(0, direct_block - standalone_pool)
+    return {
+        "total": total,
+        "in_kits": in_kits,
+        "reserved": reserved,
+        "checked_out": checked_out,
+        "available": max(0, standalone_pool - direct_block),
+        "kit_side_available": max(0, in_kits - kit_block - direct_overflow),
+    }
+
+
 def _equipment_available_in_range(
     equipment_id: int,
     quantity_needed: int,
@@ -57,76 +169,8 @@ def _equipment_available_in_range(
     end: Optional[datetime] = None,
     exclude_order_item_id: Optional[int] = None,
 ) -> int:
-    """כמה יחידות מציוד X זמינות בטווח [start, end] (או עכשיו אם start=None).
-    סופר תפיסות גם דרך OrderItem ישיר וגם דרך KitItem בערכות מאושרות.
-    """
-    eq = db.query(models.Equipment).filter(models.Equipment.id == equipment_id).first()
-    if not eq or not eq.active:
-        return 0
-    now = datetime.utcnow()
-    start = start or now
-    end = end or start
-
-    def _blocked_for_item(it: models.OrderItem) -> int:
-        """כמה יחידות נתפסות לפי הסטטוס.
-        - pending/ready: requested (שריון רך לתאריכים)
-        - checked_out:
-            * quantity_issued חסר/0 (ברירת מחדל של SQLite) → fallback לכמות המבוקשת
-              כי המנהל עוד לא סימן ידנית שיצא — נניח שהכל יצא
-            * quantity_issued > 0 → משתמשים בו (issued − returned)
-        """
-        st = it.order.status
-        if st in RESERVES_FULL_STATUSES:
-            return it.quantity or 1
-        if st in RESERVES_ISSUED_STATUSES:
-            # falsy תופס None *וגם* 0 (ה-DEFAULT של SQLite לרשומות חדשות)
-            if not it.quantity_issued:
-                returned = it.quantity_returned or 0
-                return max(0, (it.quantity or 1) - returned)
-            returned = it.quantity_returned or 0
-            return max(0, it.quantity_issued - returned)
-        return 0
-
-    blocking = 0
-    relevant_statuses = list(RESERVES_FULL_STATUSES | RESERVES_ISSUED_STATUSES)
-    # 1) OrderItems שתופסים את הציוד הזה ישירות (לא דרך ערכה)
-    items = db.query(models.OrderItem).join(models.Order).filter(
-        models.OrderItem.equipment_id == equipment_id,
-        models.Order.status.in_(relevant_statuses),
-    ).all()
-    for it in items:
-        if exclude_order_item_id and it.id == exclude_order_item_id:
-            continue
-        b = _blocked_for_item(it)
-        if not b:
-            continue
-        order = it.order
-        o_start = order.loan_date or order.requested_at or now
-        o_end = order.due_date or o_start
-        if start <= o_end and end >= o_start:
-            blocking += b
-
-    # 2) OrderItems שהם ערכות, ובערכה יש את הציוד הזה
-    kit_items = db.query(models.OrderItem).join(models.Order).filter(
-        models.OrderItem.kit_id != None,
-        models.Order.status.in_(relevant_statuses),
-    ).options(joinedload(models.OrderItem.kit).joinedload(models.Kit.items)).all()
-    for it in kit_items:
-        if not it.kit:
-            continue
-        contains = next((ki for ki in it.kit.items if ki.equipment_id == equipment_id), None)
-        if not contains:
-            continue
-        b = _blocked_for_item(it)
-        if not b:
-            continue
-        order = it.order
-        o_start = order.loan_date or order.requested_at or now
-        o_end = order.due_date or o_start
-        if start <= o_end and end >= o_start:
-            blocking += (contains.quantity_needed or 1) * b
-
-    return max(0, (eq.quantity or 0) - blocking)
+    """כמה יחידות מהפריט זמינות להזמנה *כפריט בודד* (לא דרך ערכה) בטווח."""
+    return _equipment_pools(equipment_id, db, start, end, exclude_order_item_id)["available"]
 
 
 def _kit_available_in_range(
@@ -136,21 +180,33 @@ def _kit_available_in_range(
     end: Optional[datetime] = None,
     exclude_order_item_id: Optional[int] = None,
 ) -> int:
-    """כמה ערכות זמינות בטווח — ה-min על פני הפריטים."""
+    """כמה עותקים של הערכה זמינים בטווח (בפועל 0 או 1 — כל ערכה היא ערכה פיזית אחת).
+    = min על פני החלקים של (מאגר הערכות הפנוי // כמות נדרשת), ולא יותר מ-1."""
     kit = db.query(models.Kit).filter(models.Kit.id == kit_id).first()
     if not kit or not kit.active or not kit.items:
         return 0
-    min_av = None
+    now = datetime.utcnow()
+    start = start or now
+    end = end or start
+    # האם הערכה עצמה כבר מוזמנת בטווח?
+    booked = db.query(models.OrderItem).join(models.Order).filter(
+        models.OrderItem.from_kit_id == kit_id,
+        models.Order.status.in_(list(RESERVES_FULL_STATUSES | RESERVES_ISSUED_STATUSES)),
+    ).all()
+    booked_orders = {it.order_id for it in booked
+                     if it.id != exclude_order_item_id
+                     and _overlaps(it.order, start, end, now) and _blocked_units(it)}
+    if booked_orders:
+        return 0
+    min_av = 1
     for ki in kit.items:
+        if not ki.equipment_id:
+            continue  # פריט טקסט חופשי — לא נספר במלאי
         if not ki.equipment or not ki.equipment.active:
             return 0
-        eq_av = _equipment_available_in_range(
-            ki.equipment_id, ki.quantity_needed or 1, db, start, end, exclude_order_item_id
-        )
-        slots = eq_av // (ki.quantity_needed or 1)
-        if min_av is None or slots < min_av:
-            min_av = slots
-    return max(0, min_av if min_av is not None else 0)
+        pools = _equipment_pools(ki.equipment_id, db, start, end, exclude_order_item_id)
+        min_av = min(min_av, pools["kit_side_available"] // (ki.quantity_needed or 1))
+    return max(0, min_av)
 
 
 def _can_edit(order: models.Order, user: models.User) -> bool:
@@ -249,75 +305,10 @@ def _equipment_breakdown_in_range(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
 ) -> dict:
-    """חלוקת מלאי לפריט ציוד: total / reserved / checked_out / available.
-    reserved   = מה ש-pending/ready הזמינו (שריון רך)
-    checked_out = מה ש-checked_out (יצא − חזר) — בחוץ פיזית
-    available  = total − reserved − checked_out
-    """
-    eq = db.query(models.Equipment).filter(models.Equipment.id == equipment_id).first()
-    if not eq or not eq.active:
-        return {"total": 0, "reserved": 0, "checked_out": 0, "available": 0}
-    now = datetime.utcnow()
-    start = start or now
-    end = end or start
-
-    reserved = 0
-    checked_out_count = 0
-
-    # ישיר (לא ערכה)
-    direct = db.query(models.OrderItem).join(models.Order).filter(
-        models.OrderItem.equipment_id == equipment_id,
-        models.Order.status.in_(["pending", "ready", "checked_out"]),
-    ).all()
-    for it in direct:
-        order = it.order
-        o_start = order.loan_date or order.requested_at or now
-        o_end = order.due_date or o_start
-        if not (start <= o_end and end >= o_start):
-            continue
-        if order.status in ("pending", "ready"):
-            reserved += it.quantity or 1
-        else:  # checked_out — falsy תופס None וגם 0 (ברירת מחדל של SQLite)
-            returned = it.quantity_returned or 0
-            if not it.quantity_issued:
-                checked_out_count += max(0, (it.quantity or 1) - returned)
-            else:
-                checked_out_count += max(0, it.quantity_issued - returned)
-
-    # דרך ערכה
-    kit_items = db.query(models.OrderItem).join(models.Order).filter(
-        models.OrderItem.kit_id != None,
-        models.Order.status.in_(["pending", "ready", "checked_out"]),
-    ).options(joinedload(models.OrderItem.kit).joinedload(models.Kit.items)).all()
-    for it in kit_items:
-        if not it.kit:
-            continue
-        contains = next((ki for ki in it.kit.items if ki.equipment_id == equipment_id), None)
-        if not contains:
-            continue
-        order = it.order
-        o_start = order.loan_date or order.requested_at or now
-        o_end = order.due_date or o_start
-        if not (start <= o_end and end >= o_start):
-            continue
-        per_unit = contains.quantity_needed or 1
-        if order.status in ("pending", "ready"):
-            reserved += per_unit * (it.quantity or 1)
-        else:
-            returned = it.quantity_returned or 0
-            if not it.quantity_issued:
-                checked_out_count += per_unit * max(0, (it.quantity or 1) - returned)
-            else:
-                checked_out_count += per_unit * max(0, it.quantity_issued - returned)
-
-    total = eq.quantity or 0
-    available = max(0, total - reserved - checked_out_count)
-    return {
-        "total": total,
-        "reserved": reserved,
-        "checked_out": checked_out_count,
-        "available": available,
-    }
+    """פירוט מלאי לפריט: total / in_kits / reserved / checked_out / available.
+    available = מה שניתן להזמין כפריט בודד (לא כולל יחידות ששייכות לערכות)."""
+    p = _equipment_pools(equipment_id, db, start, end)
+    return {k: p[k] for k in ("total", "in_kits", "reserved", "checked_out", "available")}
 
 
 @router.get("/availability/check")
@@ -471,6 +462,25 @@ def submit_order(
         raise HTTPException(status_code=400, detail=f"לא ניתן לשלוח — הסטטוס הנוכחי הוא '{o.status}'")
     if not o.items:
         raise HTTPException(status_code=400, detail="לא ניתן לשלוח הזמנה ריקה")
+
+    # בדיקה חוזרת בשליחה — טיוטות לא שומרות מלאי, אז ייתכן שמישהו תפס בינתיים
+    if o.loan_date and o.due_date:
+        problems = []
+        for kit_id in {it.from_kit_id for it in o.items if it.from_kit_id}:
+            if _kit_available_in_range(kit_id, db, start=o.loan_date, end=o.due_date) < 1:
+                k = db.query(models.Kit).get(kit_id)
+                problems.append(f"הערכה '{k.name if k else kit_id}'")
+        for it in o.items:
+            if it.from_kit_id or not it.equipment or it.returned_at:
+                continue
+            if it.equipment.is_key_product or _kit_reserved_units(it.equipment_id, db) > 0:
+                av = _equipment_available_in_range(it.equipment_id, it.quantity or 1, db,
+                                                   start=o.loan_date, end=o.due_date)
+                if av < (it.quantity or 1):
+                    problems.append(f"'{it.equipment.name}' (זמין {av}, הוזמן {it.quantity})")
+        if problems:
+            raise HTTPException(status_code=409,
+                                detail="לא ניתן לשלוח — נתפס בינתיים: " + ", ".join(problems))
 
     o.status = "pending"
     o.last_modified_at = datetime.utcnow()
@@ -670,25 +680,38 @@ def add_item(
     kit, eq = _validate_item_payload(db, item)
     qty = max(1, int(item.quantity or 1))
 
-    # --- אכיפת מוצר מפתח: לא ניתן להזמין מעל הזמין ---
-    if eq and eq.is_key_product and o.loan_date and o.due_date:
-        # מחשבים כמה זמין בטווח, לא כולל הפריט הנוכחי (אם קיים)
-        existing_id = None
-        if item.equipment_id:
-            existing = next((it for it in o.items if it.equipment_id == item.equipment_id and it.returned_at is None), None)
-            if existing:
-                existing_id = existing.id
-        available = _equipment_available_in_range(
-            eq.id, qty, db,
-            start=o.loan_date, end=o.due_date,
-            exclude_order_item_id=existing_id,
-        )
-        existing_qty = existing.quantity if existing else 0
-        wanted_total = existing_qty + qty
-        if available < wanted_total:
+    # --- אכיפת מלאי לפריט בודד ---
+    # חל על מוצר מפתח, וגם על כל פריט ששייך לערכה: יחידות של ערכה לא יוצאות לבד,
+    # רק העודף (total - יחידות בערכות) זמין להזמנה ישירה.
+    if eq and o.loan_date and o.due_date:
+        in_kits = _kit_reserved_units(eq.id, db)
+        if eq.is_key_product or in_kits > 0:
+            existing = next((it for it in o.items if it.equipment_id == eq.id
+                             and not it.from_kit_id and it.returned_at is None), None)
+            available = _equipment_available_in_range(
+                eq.id, qty, db, start=o.loan_date, end=o.due_date,
+                exclude_order_item_id=existing.id if existing else None,
+            )
+            wanted_total = (existing.quantity if existing else 0) + qty
+            if available < wanted_total:
+                dates = f"{o.loan_date.strftime('%d/%m')} - {o.due_date.strftime('%d/%m')}"
+                if in_kits > 0:
+                    msg = (f"'{eq.name}' שייך לערכה — ניתן להשאיל אותו לבד רק {available} "
+                           f"יחידות בתאריכים {dates}. להשאלת היתר יש להזמין את הערכה.")
+                else:
+                    msg = (f"'{eq.name}' — מוצר מפתח. זמין רק {available} בתאריכים {dates}. "
+                           f"לא ניתן להזמין {wanted_total}.")
+                raise HTTPException(status_code=409, detail=msg)
+
+    # --- אכיפת זמינות ערכה (כל ערכה היא ערכה פיזית אחת) ---
+    if kit and o.loan_date and o.due_date:
+        kit_av = _kit_available_in_range(kit.id, db, start=o.loan_date, end=o.due_date)
+        already = any(it.from_kit_id == kit.id for it in o.items)
+        if already or kit_av < qty:
             raise HTTPException(
                 status_code=409,
-                detail=f"'{eq.name}' — מוצר מפתח. זמין רק {available} בתאריכים {o.loan_date.strftime('%d/%m')} - {o.due_date.strftime('%d/%m')}. לא ניתן להזמין {wanted_total}."
+                detail=f"הערכה '{kit.name}' לא זמינה בתאריכים {o.loan_date.strftime('%d/%m')} - {o.due_date.strftime('%d/%m')}"
+                       + (" (כבר נמצאת בהזמנה)" if already else "."),
             )
 
     # --- ערכה: הרחבה לפריטים בודדים (במקום שורת "ערכה" אחת) ---
@@ -702,7 +725,8 @@ def add_item(
             # אם הציוד הזה כבר קיים בהזמנה — נגדיל כמות
             existing = next(
                 (it for it in o.items
-                 if it.equipment_id == kit_item.equipment_id and it.returned_at is None),
+                 if it.equipment_id == kit_item.equipment_id and it.from_kit_id == kit.id
+                 and it.returned_at is None),
                 None
             )
             if existing:
@@ -711,6 +735,7 @@ def add_item(
                 db.add(models.OrderItem(
                     order_id=o.id,
                     equipment_id=kit_item.equipment_id,
+                    from_kit_id=kit.id,
                     quantity=needed,
                     added_by=current_user.id,
                 ))
@@ -732,7 +757,8 @@ def add_item(
     if item.equipment_id is not None:
         existing = next(
             (it for it in o.items
-             if it.equipment_id == item.equipment_id and it.returned_at is None),
+             if it.equipment_id == item.equipment_id and not it.from_kit_id
+             and it.returned_at is None),
             None
         )
         if existing:
@@ -804,8 +830,13 @@ def update_item(
     if payload.quantity is not None:
         old_qty = it.quantity
         new_qty = max(1, int(payload.quantity))
-        # אכיפת מוצר מפתח — לא לחרוג מהזמין
-        if it.equipment and it.equipment.is_key_product and new_qty > old_qty and o.loan_date and o.due_date:
+        # שורה שנפרסה מערכה — הכמות נקבעת לפי הערכה (אפשר להוריד, לא להעלות)
+        if it.from_kit_id and new_qty > old_qty and current_user.role != "admin":
+            raise HTTPException(status_code=409,
+                                detail=f"'{_item_label(it)}' הגיע מערכה — לא ניתן להגדיל כמות. הזמן את הפריט בנפרד.")
+        # פריט בודד: מוצר מפתח או פריט ששייך לערכה — לא לחרוג מהזמין לבד
+        if (not it.from_kit_id and it.equipment and new_qty > old_qty and o.loan_date and o.due_date
+                and (it.equipment.is_key_product or _kit_reserved_units(it.equipment_id, db) > 0)):
             available = _equipment_available_in_range(
                 it.equipment_id, new_qty, db,
                 start=o.loan_date, end=o.due_date,
@@ -814,7 +845,7 @@ def update_item(
             if available < new_qty:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"'{it.equipment.name}' — מוצר מפתח. זמין רק {available} בתאריכים אלה. לא ניתן להעלות ל-{new_qty}."
+                    detail=f"'{it.equipment.name}' — זמין לבד רק {available} בתאריכים אלה. לא ניתן להעלות ל-{new_qty}."
                 )
         it.quantity = new_qty
         if old_qty != it.quantity:

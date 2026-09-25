@@ -281,6 +281,7 @@ class OrderItemOut(BaseModel):
     order_id: int
     kit_id: Optional[int] = None
     equipment_id: Optional[int] = None
+    from_kit_id: Optional[int] = None
     quantity: int = 1
     quantity_issued: Optional[int] = None     # null = טרם נקבע; 0 = פער מסומן
     quantity_returned: Optional[int] = None

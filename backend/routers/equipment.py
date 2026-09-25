@@ -13,20 +13,24 @@ router = APIRouter(prefix="/equipment", tags=["equipment"])
 
 # Allowed CSV columns (Hebrew and English aliases). Internal -> aliases.
 _CSV_FIELDS = {
-    "name":         ["שם", "name", "Name"],
-    "category":     ["קטגוריה", "category", "Category"],
-    "quantity":     ["כמות", "quantity", "Quantity"],
-    "manufacturer": ["יצרן", "manufacturer", "Manufacturer"],
-    "model_name":   ["דגם", "model", "Model"],
-    "price":        ["מחיר", "price", "Price"],
-    "location":     ["מיקום", "location", "Location"],
-    "tag_id":       ["מספר תג", "tag_id", "tag", "Tag"],
-    "image_url":    ["תמונה", "image_url", "image", "Image"],
-    "insured":      ["מבוטח", "insured", "Insured"],
-    "notes":        ["הערות", "notes", "Notes"],
+    "name":                 ["שם", "שם למחסן", "name", "Name"],
+    "display_name_student": ["שם לסטודנט", "display_name_student", "student_name"],
+    "category":             ["קטגוריה", "קטגוריה ראשית", "category", "Category"],
+    "tags":                 ["קטגוריות נוספות", "תגיות", "tags", "Tags"],
+    "quantity":             ["כמות", "סה\"כ", "quantity", "Quantity"],
+    "manufacturer":         ["יצרן", "manufacturer", "Manufacturer"],
+    "model_name":           ["דגם", "model", "Model"],
+    "price":                ["מחיר", "price", "Price"],
+    "location":             ["מיקום", "location", "Location"],
+    "tag_id":               ["מספר תג", "מק\"ט", "מקט", "barcode", "ברקוד", "tag_id", "tag", "Tag"],
+    "image_url":            ["תמונה", "image_url", "image", "Image"],
+    "insured":              ["מבוטח", "insured", "Insured"],
+    "is_key_product":       ["מוצר מפתח", "מפתח", "is_key_product", "key_product"],
+    "allowed_years":        ["שנים מותרות", "שנים", "allowed_years"],
+    "notes":                ["הערות", "notes", "Notes"],
 }
 
-_VALID_CATEGORIES = {"תאורה","סאונד","מצלמות","עדשות","חצובות","אביזרים","מוניטורים","וויירלס","מקליטים"}
+# הקטגוריה חופשית — כל ערך מותר (המערכת תומכת בקטגוריות מותאמות)
 
 
 def _normalize_row(row: dict) -> dict:
@@ -46,26 +50,33 @@ def _normalize_row(row: dict) -> dict:
     return out
 
 
+def _to_bool(v) -> bool:
+    return str(v).strip().lower() in ("כן","yes","true","1","y","v","✓")
+
+
 def _validate_row(idx: int, row: dict) -> tuple[dict | None, str | None]:
-    """ולידציה של שורה. מחזיר (dict לשמירה, שגיאה אם יש)."""
+    """ולידציה של שורה. מחזיר (dict לשמירה, שגיאה אם יש).
+    קטגוריה חופשית (אין רשימה קבועה). ניתן להוסיף שדות חדשים דרך _CSV_FIELDS."""
     if not row.get("name"):
         return None, f"שורה {idx}: חסר שם"
     if not row.get("category"):
         return None, f"שורה {idx}: חסרה קטגוריה ({row.get('name')})"
-    if row["category"] not in _VALID_CATEGORIES:
-        return None, f"שורה {idx}: קטגוריה לא תקינה '{row['category']}' ({row.get('name')})"
 
     parsed = {
         "name": row["name"],
+        "display_name_student": row.get("display_name_student"),
         "category": row["category"],
+        "tags": row.get("tags"),
         "quantity": 1,
         "insured": False,
+        "is_key_product": False,
         "price": 0.0,
         "manufacturer": row.get("manufacturer"),
         "model_name": row.get("model_name"),
         "location": row.get("location"),
         "tag_id": row.get("tag_id"),
         "image_url": row.get("image_url"),
+        "allowed_years": row.get("allowed_years"),
         "notes": row.get("notes"),
     }
     if "quantity" in row:
@@ -81,7 +92,9 @@ def _validate_row(idx: int, row: dict) -> tuple[dict | None, str | None]:
         except ValueError:
             return None, f"שורה {idx}: מחיר לא תקין '{row['price']}' ({row['name']})"
     if "insured" in row:
-        parsed["insured"] = str(row["insured"]).strip().lower() in ("כן","yes","true","1","y","v","✓")
+        parsed["insured"] = _to_bool(row["insured"])
+    if "is_key_product" in row:
+        parsed["is_key_product"] = _to_bool(row["is_key_product"])
 
     return parsed, None
 
@@ -184,10 +197,19 @@ async def import_equipment(
 def import_template(
     current_user: models.User = Depends(require_admin),
 ):
-    """תבנית CSV ריקה להורדה — עם כותרות בעברית ושורה לדוגמה."""
+    """תבנית CSV להורדה — כותרות בעברית ושורות לדוגמה עם כל השדות הנתמכים."""
     from fastapi.responses import Response
-    content = "﻿שם,קטגוריה,כמות,יצרן,דגם,מחיר,מיקום,מספר תג,תמונה,מבוטח,הערות\n"
-    content += "מצלמה Canon EOS R5,מצלמות,2,Canon,EOS R5,15000,מחסן ראשי,CAM-001,,כן,חדש 2026\n"
+    header = "שם,שם לסטודנט,קטגוריה,קטגוריות נוספות,כמות,יצרן,דגם,מק\"ט,מיקום,מחיר,שנים מותרות,מוצר מפתח,מבוטח,הערות"
+    examples = [
+        # (name, display_name_student, category, tags, quantity, manufacturer, model, tag_id, location, price, allowed_years, is_key, insured, notes)
+        'קנון 80c #1,מצלמת קנון,מצלמות,,1,Canon,EOS 80c,CAM-001,מחסן ראשי,5000,"1,2,3,4",כן,כן,ציוד מפתח — הזמנה מוגבלת',
+        'מוניטור A,מוניטור במאי,מוניטורים,,1,Atomos,Shogun 7,MON-001,מדף B2,3000,"1,2,3,4,5",כן,,',
+        'מוניטור B,מוניטור במאי,מוניטורים,,1,Atomos,Shogun 7,MON-002,מדף B2,3000,"1,2,3,4,5",כן,,',
+        'כרטיס זכרון 128GB,,אביזרים,"מצלמות,סאונד",10,SanDisk,SDXC 128GB UHS-I,MEM-001,ארון תגר 4,150,"1,2,3,4,5",,,אחסון בקופסה כחולה',
+        'שק חול 5 קילו,,תאורה,אביזרים,20,-,-,-,מחסן ראשי,80,"1,2,3,4,5",,,אין הגבלת הזמנה',
+        'סאונדמן ZOOM H6,מקליט,סאונד,,3,Zoom,H6,ZOOM-001,ארון סאונד,1200,"2,3,4",,,לתעודות שנה 2+',
+    ]
+    content = "﻿" + header + "\n" + "\n".join(examples) + "\n"
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",

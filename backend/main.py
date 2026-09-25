@@ -105,6 +105,9 @@ def _run_migrations():
             if 'quantity_returned' not in cols:
                 conn.execute(text("ALTER TABLE order_items ADD COLUMN quantity_returned INTEGER DEFAULT 0"))
                 print("[migration] Added order_items.quantity_returned")
+            if 'from_kit_id' not in cols:
+                conn.execute(text("ALTER TABLE order_items ADD COLUMN from_kit_id INTEGER REFERENCES kits(id)"))
+                print("[migration] Added order_items.from_kit_id")
 
     if 'loan_requests' in inspector.get_table_names():
         cols_info = inspector.get_columns('loan_requests')
