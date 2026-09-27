@@ -3,25 +3,19 @@ import { kitsAPI, equipmentAPI } from '../../api'
 import Modal from '../../components/Modal'
 import { InventoryTabs } from './EquipmentPage'
 
-// Searchable equipment combobox
-function EquipmentPicker({ value, onChange, allEquipment }) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const ref = useRef(null)
+// שדה בחירת ציוד עם השלמה אוטומטית — מקלידים ישירות, הרשימה מסתננת תוך כדי
+const _norm = (x) => String(x || '').toLowerCase().replace(/["'״׳\-_.,()]/g, ' ')
 
+function EquipmentPicker({ value, onChange, allEquipment }) {
   const selected = allEquipment.find(e => e.id === value)
-  const q = (search || '').toLowerCase().trim()
-  const filtered = !q ? allEquipment :
-    allEquipment.filter(e => {
-      // הגנות מפני null/undefined בנתוני ציוד
-      return (
-        (e.name || '').toLowerCase().includes(q) ||
-        (e.category || '').toLowerCase().includes(q) ||
-        (e.manufacturer || '').toLowerCase().includes(q) ||
-        (e.model_name || '').toLowerCase().includes(q) ||
-        (e.tag_id || '').toLowerCase().includes(q)
-      )
-    })
+  const label = (e) => e ? e.name : ''
+  const [text, setText] = useState(label(selected))
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(0)
+  const ref = useRef(null)
+  const listRef = useRef(null)
+
+  useEffect(() => { if (!open) setText(label(selected)) }, [value, open, allEquipment.length])
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -29,54 +23,84 @@ function EquipmentPicker({ value, onChange, allEquipment }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // כל מילה שהוקלדה חייבת להופיע באחד השדות (סדר לא משנה)
+  const words = _norm(open ? text : '').split(/\s+/).filter(Boolean)
+  const results = []
+  for (const e of allEquipment) {
+    if (words.length) {
+      const hay = _norm([e.name, e.display_name_student, e.category, e.tags, e.manufacturer, e.model_name, e.tag_id].join(' '))
+      if (!words.every(w => hay.includes(w))) continue
+    }
+    results.push(e)
+    if (results.length >= 60) break
+  }
+
+  const pick = (eq) => { onChange(eq.id); setText(eq.name); setOpen(false) }
+
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHi(h => Math.min(h + 1, results.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(h - 1, 0)) }
+    else if (e.key === 'Enter') { if (open && results[hi]) { e.preventDefault(); pick(results[hi]) } }
+    else if (e.key === 'Escape') { setOpen(false) }
+  }
+
+  useEffect(() => {
+    const el = listRef.current?.children?.[hi]
+    if (el) el.scrollIntoView({ block: 'nearest' })
+  }, [hi])
+
+  const highlight = (name) => {
+    if (!words.length) return name
+    const lower = name.toLowerCase()
+    const w = words.find(w => lower.includes(w))
+    if (!w) return name
+    const i = lower.indexOf(w)
+    return <>{name.slice(0, i)}<mark className="bg-yellow-100 text-inherit rounded px-0.5">{name.slice(i, i + w.length)}</mark>{name.slice(i + w.length)}</>
+  }
+
   return (
     <div className="relative flex-1" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white text-right flex items-center justify-between hover:border-primary-300"
-      >
-        <span className={selected ? 'text-slate-800' : 'text-slate-400'}>
-          {selected ? `${selected.name} (${selected.category})` : 'בחר ציוד'}
-        </span>
-        <span className="text-slate-400 text-xs">▼</span>
-      </button>
+      <input
+        type="text"
+        value={text}
+        placeholder="הקלד שם, יצרן, דגם או מק״ט..."
+        onFocus={(e) => { setOpen(true); setHi(0); e.target.select() }}
+        onChange={(e) => { setText(e.target.value); setOpen(true); setHi(0) }}
+        onKeyDown={onKey}
+        className={`w-full border rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-primary-500
+          ${selected ? 'border-slate-200 text-slate-800' : 'border-amber-300'}`}
+      />
+      {selected && !open && (
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 pointer-events-none">{selected.category}</span>
+      )}
       {open && (
-        <div className="absolute top-full mt-1 right-0 left-0 bg-white border border-slate-200 rounded-xl shadow-lg z-30 max-h-72 overflow-hidden flex flex-col">
-          <div className="p-2 border-b border-slate-100 sticky top-0 bg-white">
-            <input
-              type="text"
-              autoFocus
-              placeholder="חיפוש לפי שם/קטגוריה/יצרן/תג..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div className="overflow-y-auto">
-            {filtered.length === 0 ? (
-              <div className="p-4 text-center text-sm text-slate-400">לא נמצאו פריטים</div>
-            ) : filtered.map(eq => (
-              <button
-                key={eq.id}
-                type="button"
-                onClick={() => { onChange(eq.id); setOpen(false); setSearch('') }}
-                className={`w-full text-right px-3 py-2 hover:bg-primary-50 text-sm border-b border-slate-50 last:border-0
-                  ${eq.id === value ? 'bg-primary-50/50 font-bold text-primary-700' : 'text-slate-700'}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate">{eq.name}</span>
-                  <span className="text-[10px] text-slate-400 flex-shrink-0">{eq.category}</span>
+        <div ref={listRef} className="absolute top-full mt-1 right-0 left-0 bg-white border border-slate-200 rounded-xl shadow-lg z-30 max-h-72 overflow-y-auto">
+          {results.length === 0 ? (
+            <div className="p-4 text-center text-sm text-slate-400">לא נמצאו פריטים</div>
+          ) : results.map((eq, i) => (
+            <button
+              key={eq.id}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); pick(eq) }}
+              onMouseEnter={() => setHi(i)}
+              className={`w-full text-right px-3 py-2 text-sm border-b border-slate-50 last:border-0
+                ${i === hi ? 'bg-primary-50' : ''} ${eq.id === value ? 'font-bold text-primary-700' : 'text-slate-700'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate">{highlight(eq.name)}</span>
+                <span className="text-[10px] text-slate-400 flex-shrink-0">{eq.category} · {eq.quantity ?? 0} יח׳</span>
+              </div>
+              {(eq.manufacturer || eq.model_name || eq.tag_id) && (
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  {[eq.manufacturer, eq.model_name].filter(Boolean).join(' ')}
+                  {eq.tag_id && <span className="mr-2 font-mono">#{eq.tag_id}</span>}
                 </div>
-                {(eq.manufacturer || eq.tag_id) && (
-                  <div className="text-[10px] text-slate-400 mt-0.5">
-                    {eq.manufacturer && <span>{eq.manufacturer}</span>}
-                    {eq.tag_id && <span className="mr-2 font-mono">#{eq.tag_id}</span>}
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
+              )}
+            </button>
+          ))}
+          {results.length >= 60 && (
+            <div className="p-2 text-center text-[11px] text-slate-400">מוצגות 60 תוצאות ראשונות — המשך להקליד לצמצום</div>
+          )}
         </div>
       )}
     </div>
@@ -143,7 +167,9 @@ function KitForm({ initial, onSubmit, onClose, loading, allEquipment }) {
           <select required value={form.category} onChange={e => set('category', e.target.value)}
             className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500">
             <option value="">בחר קטגוריה</option>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            {[...new Set([...CATEGORIES, ...allEquipment.map(e => e.category).filter(Boolean), form.category].filter(Boolean))]
+              .sort((a, b) => a.localeCompare(b, 'he'))
+              .map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div className="grid grid-cols-2 gap-2">
